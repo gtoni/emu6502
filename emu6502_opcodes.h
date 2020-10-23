@@ -1,7 +1,7 @@
 #ifndef _EMU6502_OPCODES_H_
 #define _EMU6502_OPCODES_H_
 
-#define IC_BRK      0x00    /* used for reset */
+#define IC_BRK      0x00
 
 #define IC_PHP      0x08
 #define IC_PHA      0x48
@@ -92,6 +92,16 @@
 #define IC_ROR_ZP_X     0x76
 #define IC_ROR_ACC      0x6A
 
+#define IC_DEC_ABS      0xCE
+#define IC_DEC_ABS_X    0xDE
+#define IC_DEC_ZP       0xC6
+#define IC_DEC_ZP_X     0xD6
+
+#define IC_INC_ABS      0xEE
+#define IC_INC_ABS_X    0xFE
+#define IC_INC_ZP       0xE6
+#define IC_INC_ZP_X     0xF6
+
 #define IC_ASL_ABS      0x0E
 #define IC_ASL_ABS_X    0x1E
 #define IC_ASL_ZP       0x06
@@ -145,6 +155,21 @@
 #define IC_SBC_ZP_X     0xF5
 #define IC_SBC_IND_X    0xE1
 #define IC_SBC_IND_Y    0xF1
+
+#define IC_CMP_IMM      0xC9
+#define IC_CMP_ABS      0xCD
+#define IC_CMP_ABS_X    0xDD
+#define IC_CMP_ABS_Y    0xD9
+#define IC_CMP_ZP       0xC5
+#define IC_CMP_ZP_X     0xD5
+#define IC_CMP_IND_X    0xC1
+#define IC_CMP_IND_Y    0xD1
+#define IC_CPX_IMM      0xE0
+#define IC_CPX_ABS      0xEC
+#define IC_CPX_ZP       0xE4
+#define IC_CPY_IMM      0xC0
+#define IC_CPY_ABS      0xCC
+#define IC_CPY_ZP       0xC4
 
 #define IC_JSR      0x20
 

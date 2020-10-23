@@ -7,19 +7,29 @@
 
 struct cpu_state_
 {
-    uint8_t  instruction;
-    uint8_t  cycle;
-    uint8_t  memory_addr_low;   //24 bits
+    uint32_t cycle; /* contains:
+        0x000000FF     : current cycle
+        0x0000FF00     : current instruction
+        0x00FF0000     : latch address
+    */
+        
+    uint16_t PC;             
+    uint8_t  S;
+    uint8_t  Y;
+
+    uint16_t address;         
+    uint8_t  rw     : 1;
+    uint8_t  irq    : 1;
+    uint8_t  nmi    : 1;
+    uint8_t  data;
 
     // registers
     uint8_t  A;
     uint8_t  X;
-    uint8_t  Y;
-    uint8_t  S;
     uint8_t  P; 
-    uint16_t PC;                //56 bits 
-
+ 
     // pins
+/*    
     uint8_t  ad1 : 1;
     uint8_t  ad2 : 1;
 
@@ -29,22 +39,24 @@ struct cpu_state_
 
     uint8_t  oe1 : 1;
     uint8_t  oe2 : 1;
-
-    uint8_t  rw : 1;
-
-    uint8_t  nmi : 1;
-    uint8_t  irq : 1;           // 17 bits
-
-    uint8_t  data;
-    uint16_t address;           // 24 bits
+*/
 };
 
 typedef struct cpu_state_ cpu_state;
 
+#define CPU_IS_WRITE(cpu) (cpu.rw)
+#define _CPU_SET_READ(cpu) (cpu.rw = 0)
+#define _CPU_SET_WRITE(cpu) (cpu.rw = 1)
 
-#define _CPU_END(cpu)               {cpu.cycle = 0;}
-#define _CPU_FETCH_INSTRUCTION(cpu) {cpu.rw = 0; cpu.address = cpu.PC++;}
-#define _CPU_FETCH_OPERAND(cpu)     {cpu.rw = 0; cpu.address = cpu.PC++;}
+#define _CPU_SET_INSTRUCTION(cpu)   (cpu.cycle = (cpu.cycle & 0xFFFF00FF) | (((uint32_t)cpu.data) << 8))
+#define _CPU_GET_INSTRUCTION(cpu)   ((cpu.cycle >> 8) & 0xFF)
+
+#define _CPU_LATCH_ADDR(cpu)        (cpu.cycle = (cpu.cycle & 0xFF00FFFF) | (cpu.data<<16))
+#define _CPU_GET_LATCH_ADDR(cpu)    ((cpu.cycle>>16)&0xFF)
+
+#define _CPU_END(cpu)               {cpu.cycle = cpu.cycle & 0xFFFFFF00;}
+#define _CPU_FETCH_INSTRUCTION(cpu) {_CPU_SET_READ(cpu); cpu.address = cpu.PC++;}
+#define _CPU_FETCH_OPERAND(cpu)     {_CPU_SET_READ(cpu); cpu.address = cpu.PC++;}
 #define _CPU_COND_BRANCH(cpu, cond) cpu.PC += (cond)?(int8_t)cpu.data : 0
 
 #define _CPU_UPDATE_NZ(cpu, v)       (cpu.P = (cpu.P & 0x7D)| ((v & 0x80) | (v?0:0x02)))
@@ -69,9 +81,15 @@ typedef struct cpu_state_ cpu_state;
     _CPU_SET_REG_P(cpu, (cpu.P & 0xFE) | ((~tmp >> 8) & 1));\
 }
 
+#define _CPU_CMP(cpu, reg) {\
+    uint16_t tmp = ((uint16_t)reg) - cpu.data;\
+    _CPU_UPDATE_NZ(cpu, (tmp & 0xFF));\
+    _CPU_SET_REG_P(cpu, (cpu.P & 0xFE) | ((~tmp >> 8) & 1));\
+}
+
 #define _CPU_ROL(cpu, v) {\
     uint8_t tmp = cpu.P & 1;\
-    cpu.rw = 1;\
+    _CPU_SET_WRITE(cpu);\
     _CPU_SET_REG_P(cpu, (cpu.P & 0xFE) | (v >> 7));\
     v = (v << 1) | tmp;\
     _CPU_UPDATE_NZ(cpu, v);\
@@ -79,73 +97,55 @@ typedef struct cpu_state_ cpu_state;
 
 #define _CPU_ROR(cpu, v) {\
     uint8_t tmp = cpu.P & 1;\
-    cpu.rw = 1;\
+    _CPU_SET_WRITE(cpu);\
     _CPU_SET_REG_P(cpu, (cpu.P & 0xFE) | (v & 1));\
     v = (v >> 1) | (tmp << 7);\
     _CPU_UPDATE_NZ(cpu, v);\
 }
 
 #define _CPU_ASL(cpu, v) {\
-    cpu.rw = 1;\
+    _CPU_SET_WRITE(cpu);\
     _CPU_SET_REG_P(cpu, (cpu.P & 0xFE) | (v >> 7 ));\
     v = (v << 1);\
     _CPU_UPDATE_NZ(cpu, v);\
 }
 
 #define _CPU_LSR(cpu, v) {\
-    cpu.rw = 1;\
+    _CPU_SET_WRITE(cpu);\
     _CPU_SET_REG_P(cpu, (cpu.P & 0xFE) | (v & 1));\
     v = (v >> 1);\
     cpu.P = (cpu.P & 0x7D) | (v?0:0x02);\
 }
 
-
 static cpu_state cpu_reset()
 {
     cpu_state state;
     memset(&state, 0, sizeof(cpu_state));
-    state.address = 0xfffc;
-    state.S = 0xff;
+    state.cycle = 1;
     return state; 
 }
 
 static cpu_state cpu_execute(cpu_state state)
 {
     uint8_t cycle = state.cycle++;
-
-    if (state.instruction == 0)
-    {
-        if (cycle == 0)
-        {
-            if (state.address != 0xfffc)
-                return state;
-            state.address = 0xfffd;
-            state.PC = state.data;
-            return state;
-        }
-        else if (cycle == 1)
-        {
-            state.PC = (state.data << 8) | state.PC;
-            _CPU_FETCH_INSTRUCTION(state);
-            return state;
-        }
-        cycle = 0;
-        state.cycle = 1;
-    }
+    uint8_t instruction = _CPU_GET_INSTRUCTION(state);
 
     if (cycle == 0)
     {
-        state.instruction = state.data;
+        _CPU_SET_INSTRUCTION(state);
 
-        switch (state.instruction)
+        switch (state.data)
         {
+            case IC_BRK:
+                _CPU_SET_REG_P(state, state.P | 0x10);
+                return state;
             case IC_PHP:
-                state.rw = 1;
+                _CPU_SET_WRITE(state);
                 state.address = ((uint8_t)state.S--) + 0x0100;
                 state.data = state.P;
                 return state;
             case IC_PHA:
-                state.rw = 1;
+                _CPU_SET_WRITE(state);
                 state.address = ((uint8_t)state.S--) + 0x0100;
                 state.data = state.A;
                 return state;
@@ -227,16 +227,25 @@ static cpu_state cpu_execute(cpu_state state)
     }
     else if (cycle == 1)
     {
-        switch (state.instruction)
+        switch (instruction)
         {
-            case IC_ADC_IMM:  _CPU_ADC(state); break;
-            case IC_AND_IMM:  _CPU_SET_REG_A(state, state.A & state.data); break;
-            case IC_ORA_IMM:  _CPU_SET_REG_A(state, state.A | state.data); break;
-            case IC_EOR_IMM:  _CPU_SET_REG_A(state, state.A ^ state.data); break;
-            case IC_LDA_IMM:  _CPU_SET_REG_A(state, state.data); break;
-            case IC_LDX_IMM:  _CPU_SET_REG_X(state, state.data); break;
-            case IC_LDY_IMM:  _CPU_SET_REG_Y(state, state.data); break;
-            case IC_SBC_IMM:  _CPU_SBC(state); break;
+            case IC_BRK:
+                if (state.nmi || state.irq || (state.P & 0x10))
+                    _CPU_SET_WRITE(state);
+                state.data = state.PC >> 8;
+                state.address = ((uint8_t)state.S--) + 0x0100;
+                return state;
+            case IC_ADC_IMM: _CPU_ADC(state); break;
+            case IC_AND_IMM: _CPU_SET_REG_A(state, state.A & state.data); break;
+            case IC_ORA_IMM: _CPU_SET_REG_A(state, state.A | state.data); break;
+            case IC_EOR_IMM: _CPU_SET_REG_A(state, state.A ^ state.data); break;
+            case IC_LDA_IMM: _CPU_SET_REG_A(state, state.data); break;
+            case IC_LDX_IMM: _CPU_SET_REG_X(state, state.data); break;
+            case IC_LDY_IMM: _CPU_SET_REG_Y(state, state.data); break;
+            case IC_SBC_IMM: _CPU_SBC(state); break;
+            case IC_CMP_IMM: _CPU_CMP(state, state.A); break;
+            case IC_CPX_IMM: _CPU_CMP(state, state.X); break;
+            case IC_CPY_IMM: _CPU_CMP(state, state.Y); break;
             case IC_BCC:      _CPU_COND_BRANCH(state, (state.P & 0x01) == 0); break;
             case IC_BCS:      _CPU_COND_BRANCH(state, (state.P & 0x01)); break;
             case IC_BNE:      _CPU_COND_BRANCH(state, (state.P & 0x02) == 0); break;
@@ -273,6 +282,15 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_SBC_ABS:
             case IC_SBC_ABS_X:
             case IC_SBC_ABS_Y:
+            case IC_CMP_ABS:
+            case IC_CMP_ABS_X:
+            case IC_CMP_ABS_Y:
+            case IC_CPX_ABS:
+            case IC_CPY_ABS:
+            case IC_DEC_ABS:
+            case IC_DEC_ABS_X:
+            case IC_INC_ABS:
+            case IC_INC_ABS_X:
             case IC_AND_ABS:
             case IC_AND_ABS_X:
             case IC_AND_ABS_Y:
@@ -283,7 +301,7 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_EOR_ABS_X:
             case IC_EOR_ABS_Y:
             case IC_BIT_ABS:
-                state.memory_addr_low = state.data;
+                _CPU_LATCH_ADDR(state);
                 _CPU_FETCH_OPERAND(state);
                 return state;
             case IC_LDA_ZP:
@@ -296,6 +314,11 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_LSR_ZP:
             case IC_ADC_ZP:
             case IC_SBC_ZP:
+            case IC_CMP_ZP:
+            case IC_CPX_ZP:
+            case IC_CPY_ZP:
+            case IC_DEC_ZP:
+            case IC_INC_ZP:
             case IC_AND_ZP:
             case IC_ORA_ZP:
             case IC_EOR_ZP:
@@ -309,6 +332,9 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_LSR_ZP_X:
             case IC_ADC_ZP_X:
             case IC_SBC_ZP_X:
+            case IC_CMP_ZP_X:
+            case IC_DEC_ZP_X:
+            case IC_INC_ZP_X:
             case IC_AND_ZP_X:
             case IC_ORA_ZP_X:
             case IC_EOR_ZP_X:
@@ -318,32 +344,32 @@ static cpu_state cpu_execute(cpu_state state)
                 state.address = state.data + state.Y;
                 return state;
             case IC_STA_ZP:
-                state.rw = 1;
+                _CPU_SET_WRITE(state);
                 state.address = state.data;
                 state.data = state.A;
                 return state;
             case IC_STA_ZP_X:
-                state.rw = 1;
+                _CPU_SET_WRITE(state);
                 state.address = state.data + state.X;
                 state.data = state.A;
                 return state;
             case IC_STX_ZP:
-                state.rw = 1;
+                _CPU_SET_WRITE(state);
                 state.address = state.data;
                 state.data = state.X;
                 return state;
             case IC_STX_ZP_Y:
-                state.rw = 1;
+                _CPU_SET_WRITE(state);
                 state.address = state.data + state.Y;
                 state.data = state.X;
                 return state;
             case IC_STY_ZP:
-                state.rw = 1;
+                _CPU_SET_WRITE(state);
                 state.address = state.data;
                 state.data = state.Y;
                 return state;
             case IC_STY_ZP_X:
-                state.rw = 1;
+                _CPU_SET_WRITE(state);
                 state.address = state.data + state.X;
                 state.data = state.Y;
                 return state;
@@ -351,6 +377,7 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_STA_IND_X:
             case IC_ADC_IND_X:
             case IC_SBC_IND_X:
+            case IC_CMP_IND_X:
             case IC_AND_IND_X:
             case IC_ORA_IND_X:
             case IC_EOR_IND_X:
@@ -360,17 +387,18 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_STA_IND_Y:
             case IC_ADC_IND_Y:
             case IC_SBC_IND_Y:
+            case IC_CMP_IND_Y:
             case IC_AND_IND_Y:
             case IC_ORA_IND_Y:
             case IC_EOR_IND_Y:
                 state.address = state.data;
                 return state;
             case IC_JSR:
-                state.memory_addr_low = state.data;
+                _CPU_LATCH_ADDR(state);
                 return state;
             case IC_PHA:
             case IC_PHP:
-                state.rw = 0;
+                _CPU_SET_READ(state);
                 return state;
             case IC_RTS:
                 // skip one cycle to align with RTI
@@ -391,68 +419,81 @@ static cpu_state cpu_execute(cpu_state state)
     }
     else if (cycle == 2)
     {
-        switch (state.instruction)
+        switch (instruction)
         {
+            case IC_BRK:
+                state.data = state.PC;
+                state.address = ((uint8_t)state.S--) + 0x0100;
+                return state;
             case IC_LDA_ABS:
             case IC_LDX_ABS:
             case IC_LDY_ABS:
             case IC_ROL_ABS:
             case IC_ROR_ABS:
+            case IC_DEC_ABS:
+            case IC_INC_ABS:
             case IC_ASL_ABS:
             case IC_LSR_ABS:
             case IC_ADC_ABS:
             case IC_SBC_ABS:
+            case IC_CMP_ABS:
+            case IC_CPX_ABS:
+            case IC_CPY_ABS:
             case IC_AND_ABS:
             case IC_ORA_ABS:
             case IC_EOR_ABS:
             case IC_BIT_ABS:
-                state.address = (state.data << 8) | state.memory_addr_low;
+                state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 return state;
             case IC_LDA_ABS_X:
             case IC_LDY_ABS_X:
             case IC_ROL_ABS_X:
             case IC_ROR_ABS_X:
+            case IC_DEC_ABS_X:
+            case IC_INC_ABS_X:
             case IC_ASL_ABS_X:
             case IC_LSR_ABS_X:
             case IC_ADC_ABS_X:
             case IC_SBC_ABS_X:
+            case IC_CMP_ABS_X:
             case IC_AND_ABS_X:
             case IC_ORA_ABS_X:
             case IC_EOR_ABS_X:
-                state.address = ((state.data << 8) | state.memory_addr_low) + state.X;
+                state.address = ((state.data << 8) | _CPU_GET_LATCH_ADDR(state)) + state.X;
                 return state;
             case IC_LDA_ABS_Y:
             case IC_LDX_ABS_Y:
             case IC_ADC_ABS_Y:
             case IC_SBC_ABS_Y:
+            case IC_CMP_ABS_Y:
             case IC_AND_ABS_Y:
             case IC_ORA_ABS_Y:
             case IC_EOR_ABS_Y:
-                state.address = ((state.data << 8) | state.memory_addr_low) + state.Y;
+                state.address = ((state.data << 8) | _CPU_GET_LATCH_ADDR(state)) + state.Y;
                 return state;
             case IC_STA_ABS:
-                state.rw = 1;
-                state.address = (state.data << 8) | state.memory_addr_low;
+                _CPU_SET_WRITE(state);
+                state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 state.data = state.A;
                 return state;
             case IC_STA_ABS_X:
-                state.rw = 1;
-                state.address = ((state.data << 8) | state.memory_addr_low) + state.X;
+                _CPU_SET_WRITE(state);
+                state.address = ((state.data << 8) | _CPU_GET_LATCH_ADDR(state)) + state.X;
                 state.data = state.A;
                 return state;
             case IC_STA_ABS_Y:
-                state.rw = 1;
-                state.address = ((state.data << 8) | state.memory_addr_low) + state.Y;
+                _CPU_SET_WRITE(state);
+                state.address = ((state.data << 8) | _CPU_GET_LATCH_ADDR(state)) + state.Y;
                 state.data = state.A;
                 return state;
             case IC_STX_ABS:
-                state.rw = 1;
-                state.address = (state.data << 8) | state.memory_addr_low;
+                _CPU_SET_WRITE(state);
+                state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 state.data = state.X;
                 return state;
             case IC_STY_ABS:
-                state.rw = 1;
-                state.address = (state.data << 8) | state.memory_addr_low;
+                _CPU_SET_WRITE(state);
+                state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 state.data = state.Y;
                 return state;
             case IC_LDA_IND_X:
@@ -463,21 +504,23 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_ADC_IND_Y:
             case IC_SBC_IND_X:
             case IC_SBC_IND_Y:
+            case IC_CMP_IND_X:
+            case IC_CMP_IND_Y:
             case IC_AND_IND_X:
             case IC_AND_IND_Y:
             case IC_ORA_IND_X:
             case IC_ORA_IND_Y:
             case IC_EOR_IND_X:
             case IC_EOR_IND_Y:
-                state.memory_addr_low = state.data;
+                _CPU_LATCH_ADDR(state);
                 state.address +=1;
                 return state;
             case IC_JMP:
-                state.address = (state.data << 8) | state.memory_addr_low;
+                state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 state.PC = state.address;
                 break;
             case IC_JMP_IND:
-                state.address = (state.data << 8) | state.memory_addr_low;
+                state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 return state;
             case IC_BIT_ZP: _CPU_BIT(state); break;
             case IC_LDA_ZP: _CPU_SET_REG_A(state, state.data); break;
@@ -485,6 +528,9 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_LDY_ZP: _CPU_SET_REG_Y(state, state.data); break;
             case IC_ADC_ZP: _CPU_ADC(state); break;
             case IC_SBC_ZP: _CPU_SBC(state); break;
+            case IC_CMP_ZP: _CPU_CMP(state, state.A); break;
+            case IC_CPX_ZP: _CPU_CMP(state, state.X); break;
+            case IC_CPY_ZP: _CPU_CMP(state, state.Y); break;
             case IC_AND_ZP: _CPU_SET_REG_A(state, state.A & state.data); break;
             case IC_ORA_ZP: _CPU_SET_REG_A(state, state.A | state.data); break;
             case IC_EOR_ZP: _CPU_SET_REG_A(state, state.A ^ state.data); break;
@@ -498,13 +544,13 @@ static cpu_state cpu_execute(cpu_state state)
                 _CPU_SET_REG_X(state, state.data);
                 return state;
             case IC_JSR:
-                state.rw = 1;
+                _CPU_SET_WRITE(state);
                 state.data = (state.PC >> 8);
                 state.address = ((uint8_t)state.S--) + 0x0100;
                 return state;
             case IC_RTS:
             case IC_RTI:
-                state.memory_addr_low = state.data;
+                _CPU_LATCH_ADDR(state);
                 state.address = ((uint8_t)++state.S) + 0x0100;
                 return state;
             case IC_PLA:
@@ -513,6 +559,10 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_ROL_ZP_X:
             case IC_ROR_ZP:
             case IC_ROR_ZP_X:
+            case IC_DEC_ZP:
+            case IC_DEC_ZP_X:
+            case IC_INC_ZP:
+            case IC_INC_ZP_X:
             case IC_ASL_ZP:
             case IC_ASL_ZP_X:
             case IC_LSR_ZP:
@@ -522,19 +572,24 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_STY_ZP_X:
             case IC_ADC_ZP_X:
             case IC_SBC_ZP_X:
+            case IC_CMP_ZP_X:
             case IC_AND_ZP_X:
             case IC_ORA_ZP_X:
             case IC_EOR_ZP_X:
                 // empty cycles
-                state.rw = 0;
+                _CPU_SET_READ(state);
                 return state;
             default: break;
         }
     }
     else if (cycle == 3)
     {
-        switch(state.instruction)
+        switch(instruction)
         {
+            case IC_BRK:
+                state.data = state.P;
+                state.address = ((uint8_t)state.S--) + 0x0100;
+                return state;
             case IC_ADC_ABS:
             case IC_ADC_ABS_X:
             case IC_ADC_ABS_Y:
@@ -546,6 +601,18 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_SBC_ABS_Y:
             case IC_SBC_ZP_X: 
                 _CPU_SBC(state); 
+                break;
+            case IC_CMP_ABS:
+            case IC_CMP_ABS_X:
+            case IC_CMP_ABS_Y:
+            case IC_CMP_ZP_X:
+                _CPU_CMP(state, state.A);
+                break;
+            case IC_CPX_ABS:
+                _CPU_CMP(state, state.X);
+                break;
+            case IC_CPY_ABS:
+                _CPU_CMP(state, state.Y);
                 break;
             case IC_AND_ABS:
             case IC_AND_ABS_X:
@@ -584,57 +651,75 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_ROL_ZP:
             case IC_ROL_ZP_X:
                 _CPU_ROL(state, state.data);
-                state.rw = 1;
+                _CPU_SET_WRITE(state);
                 return state;
             case IC_ROR_ABS:
             case IC_ROR_ABS_X:
             case IC_ROR_ZP:
             case IC_ROR_ZP_X:
                 _CPU_ROR(state, state.data);
-                state.rw = 1;
+                _CPU_SET_WRITE(state);
+                return state;
+            case IC_DEC_ABS:
+            case IC_DEC_ABS_X:
+            case IC_DEC_ZP:
+            case IC_DEC_ZP_X:
+                state.data -= 1;
+                _CPU_UPDATE_NZ(state, state.data);
+                _CPU_SET_WRITE(state);
+                return state;
+            case IC_INC_ABS:
+            case IC_INC_ABS_X:
+            case IC_INC_ZP:
+            case IC_INC_ZP_X:
+                state.data += 1;
+                _CPU_UPDATE_NZ(state, state.data);
+                _CPU_SET_WRITE(state);
                 return state;
             case IC_ASL_ABS:
             case IC_ASL_ABS_X:
             case IC_ASL_ZP:
             case IC_ASL_ZP_X:
                 _CPU_ASL(state, state.data);
-                state.rw = 1;
+                _CPU_SET_WRITE(state);
                 return state;
             case IC_LSR_ABS:
             case IC_LSR_ABS_X:
             case IC_LSR_ZP:
             case IC_LSR_ZP_X:
                 _CPU_LSR(state, state.data);
-                state.rw = 1;
+                _CPU_SET_WRITE(state);
                 return state;
             case IC_LDA_IND_X:
             case IC_ADC_IND_X:
             case IC_SBC_IND_X:
+            case IC_CMP_IND_X:
             case IC_AND_IND_X:
             case IC_ORA_IND_X:
             case IC_EOR_IND_X:
-                state.address = (state.data << 8) | state.memory_addr_low;
+                state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 return state;
             case IC_LDA_IND_Y:
             case IC_ADC_IND_Y:
             case IC_SBC_IND_Y:
+            case IC_CMP_IND_Y:
             case IC_AND_IND_Y:
             case IC_ORA_IND_Y:
             case IC_EOR_IND_Y:
-                state.address = ((state.data << 8) | state.memory_addr_low) + state.Y;
+                state.address = ((state.data << 8) | _CPU_GET_LATCH_ADDR(state)) + state.Y;
                 return state;
             case IC_STA_IND_X:
-                state.rw = 1;
-                state.address = (state.data << 8) | state.memory_addr_low;
+                _CPU_SET_WRITE(state);
+                state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 state.data = state.A;
                 return state;
             case IC_STA_IND_Y:
-                state.rw = 1;
-                state.address = ((state.data << 8) | state.memory_addr_low) + state.Y;
+                _CPU_SET_WRITE(state);
+                state.address = ((state.data << 8) | _CPU_GET_LATCH_ADDR(state)) + state.Y;
                 state.data = state.A;
                 return state;
             case IC_JMP_IND:
-                state.memory_addr_low = state.data;
+                _CPU_LATCH_ADDR(state);
                 state.address += 1;
                 return state;
             case IC_JSR:
@@ -643,7 +728,7 @@ static cpu_state cpu_execute(cpu_state state)
                 return state;
            case IC_RTS:
            case IC_RTI:
-                state.PC = (state.data << 8) | state.memory_addr_low;
+                state.PC = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 state.address = ++state.PC;
                 return state;
             case IC_STA_ABS_X:
@@ -655,22 +740,33 @@ static cpu_state cpu_execute(cpu_state state)
     }
     else if (cycle == 4)
     {
-        switch (state.instruction)
+        switch (instruction)
         {
+            case IC_BRK:
+                _CPU_SET_READ(state);
+                if (state.nmi)
+                    state.address = 0xFFFA;
+                else if (state.irq || (state.P & 0x10))
+                    state.address = 0xFFFE;
+                else
+                    state.address = 0xfffc;
+                return state;
             case IC_LDA_IND_X: _CPU_SET_REG_A(state, state.data); return state;
             case IC_ADC_IND_X: _CPU_ADC(state); return state;
             case IC_SBC_IND_X: _CPU_SBC(state); return state;
+            case IC_CMP_IND_X: _CPU_CMP(state, state.A); return state;
             case IC_AND_IND_X: _CPU_SET_REG_A(state, state.A & state.data); return state;
             case IC_ORA_IND_X: _CPU_SET_REG_A(state, state.A | state.data); return state;
             case IC_EOR_IND_X: _CPU_SET_REG_A(state, state.A ^ state.data); return state;
             case IC_LDA_IND_Y: _CPU_SET_REG_A(state, state.data); break;
             case IC_ADC_IND_Y: _CPU_ADC(state); break;
             case IC_SBC_IND_Y: _CPU_SBC(state); break;
+            case IC_CMP_IND_Y: _CPU_CMP(state, state.A); break;
             case IC_AND_IND_Y: _CPU_SET_REG_A(state, state.A & state.data); break;
             case IC_ORA_IND_Y: _CPU_SET_REG_A(state, state.A | state.data); break;
             case IC_EOR_IND_Y: _CPU_SET_REG_A(state, state.A ^ state.data); break;
             case IC_JMP_IND:
-                state.address = (state.data << 8) | state.memory_addr_low;
+                state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 state.PC = state.address;
                 break;
             case IC_JSR:
@@ -682,6 +778,12 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_ROR_ABS:
             case IC_ROR_ABS_X:
             case IC_ROR_ZP_X:
+            case IC_DEC_ABS:
+            case IC_DEC_ABS_X:
+            case IC_DEC_ZP_X:
+            case IC_INC_ABS:
+            case IC_INC_ABS_X:
+            case IC_INC_ZP_X:
             case IC_ASL_ABS:
             case IC_ASL_ABS_X:
             case IC_ASL_ZP_X:
@@ -693,31 +795,56 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_RTS:
             case IC_RTI:
                 // empty cycles
-                state.rw = 0;
+                _CPU_SET_READ(state);
                 return state;
             default: break;
         }
     }
     else if (cycle == 5)
     {
-        switch (state.instruction)
+        switch (instruction)
         {
+            case IC_BRK:
+                state.PC = state.data;
+                state.address += 1;
+                return state;
             case IC_JSR:
-                state.PC = (state.data << 8) | state.memory_addr_low;
+                state.PC = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 break;
             case IC_ROL_ABS_X:
             case IC_ROR_ABS_X:
+            case IC_DEC_ABS_X:
+            case IC_INC_ABS_X:
             case IC_ASL_ABS_X:
             case IC_LSR_ABS_X:
                 // empty cycle
-                state.rw = 0;
+                _CPU_SET_READ(state);
                 return state;
+        }
+    }
+    else if (cycle == 6)
+    {
+        if (instruction == IC_BRK)
+        {
+            state.PC = (state.data << 8) | state.PC; 
         }
     }
 
     _CPU_END(state);
-    _CPU_FETCH_INSTRUCTION(state);
-    return state;
+
+    if (state.irq || state.nmi)
+    {
+        state.data = 0;
+        state.cycle += 1;
+        _CPU_SET_INSTRUCTION(state);
+        _CPU_SET_WRITE(state);
+        return state;
+    }
+    else
+    {
+        _CPU_FETCH_INSTRUCTION(state);
+        return state;
+    }
 }
 
 #endif

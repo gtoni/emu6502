@@ -4,7 +4,10 @@
 #include <memory.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <time.h>
 #include "emu6502.h"
+
+#define BENCHMARK 0
 
 void run_vm(const char* rom_path);
 
@@ -14,6 +17,13 @@ int main(int argc, char** argv)
     return 0;
 }
 
+unsigned long long time_ns()
+{
+	struct timespec tv;
+	clock_gettime(CLOCK_MONOTONIC, &tv);
+	return tv.tv_nsec + tv.tv_sec * 1000000000ULL;
+}
+
 void run_vm(const char* rom_path)
 {
     struct stat     rom_stat;
@@ -21,11 +31,14 @@ void run_vm(const char* rom_path)
     uint8_t*        rom;
     cpu_state       cpu = cpu_reset();
     uint8_t*        ram = (uint8_t*)malloc(32768);
+    uint32_t        counter = 0;
+
+    size_t test = sizeof(cpu_state);
 
     uint8_t         display[256] = {0xff};
     int             update_display = 0;
-    int             i;
     struct winsize  w;
+    uint64_t        time = 0;
     
     stat(rom_path, &rom_stat);
 
@@ -69,43 +82,64 @@ void run_vm(const char* rom_path)
         }
         else if (address >= 0x4000 && address <= (0x4000 + sizeof(display)))
         {
-            update_display = 1;
             memory = display;
             address -= 0x4000;
         }
         
         /* Memory read/write */
-        if (cpu.rw == 0)
-        {
-            cpu.data = memory[address];
-        }
-        else
+        if (CPU_IS_WRITE(cpu))
         {
             memory[address] = cpu.data;
             if (memory == display)
                 update_display = 1;
         }
+        else
+        {
+            cpu.data = memory[address];
+        }
 
         /* Run CPU */
         cpu = cpu_execute(cpu);
 
-        /* Display */ 
-        if (update_display)
+        if (++counter)
         {
-            update_display = 0;
-            printf("\e[?25l"); // hide cursor
-            printf("\33[2K\r");// delete line
-            for (i = 0; i < sizeof(display); ++i)
+#if BENCHMARK == 1
+            if (counter == 1000000)
             {
-                if (i >= w.ws_col) continue;
-
-                char c = display[i];
-                printf("%c", c ? c : ' ');
+                uint64_t sample_time = time_ns() - time;
+                uint64_t ns_per_cycle = sample_time / counter;
+                uint64_t cycles_per_mcs = 1000000ULL / ns_per_cycle;
+                float freqMHz = ((float)cycles_per_mcs) / 1000.0f;
+                counter = 0;
+                printf("freq: %.3f MHz time: %u mcs\n", freqMHz, ((uint32_t)(sample_time /1000ULL)));
+                fflush(stdout);
+                usleep(10);
+                time = time_ns();
             }
+#else 
+            if ((counter %5) == 0)
+            {
+                /* Display */ 
+                if (update_display)
+                {
+                    update_display = 0;
+                    int i;
+                    printf("\e[?25l"); // hide cursor
+                    printf("\33[2K\r");// delete line
+                    for (i = 0; i < sizeof(display); ++i)
+                    {
+                        if (i >= w.ws_col) continue;
 
-            fflush(stdout);
+                        char c = display[i];
+                        printf("%c", c ? c : ' ');
+                    }
+
+                    fflush(stdout);
+                }
+                usleep(10);
+            }
+#endif
         }
-        usleep(10);
     }
 
     free(rom);

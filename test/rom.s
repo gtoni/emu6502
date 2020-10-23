@@ -2,17 +2,26 @@ DISPLAY_ARRAY = $4000
 
     .org $8000
 reset:
+    brk
+    jmp reset
+
+irq:
+nmi:
     lda #0
     pha
 ; test
 
     lda #%11
-    ldx 10
+    ldx #10
     sta 300, x
     
-    lda #%10
-    eor 300, x
-    bne success ;not equal - zero flag is not set 
+    lda #3
+    cmp 300, x 
+
+    lda #$ff
+    sta 300
+    inc 300
+    beq success ;not equal - zero flag is not set 
 ; end test
     pla
     lda #8
@@ -43,6 +52,7 @@ end_display_message:
 message:     .asciiz "SUCCESS"
              .asciiz "FAIL   "
 
-    .org $fffc
+    .org $fffa
+    .word nmi
     .word reset
-    .word 0
+    .word irq

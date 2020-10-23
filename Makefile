@@ -21,7 +21,7 @@ endif
 all: main test/rom.bin
 
 main: main.c emu6502.h emu6502_opcodes.h
-	gcc -g3 -DDEBUG main.c -o main
+	gcc -g3 -fno-inline main.c -o main
 
 test/rom.bin: test/rom.s
 	$(VASM) -Fbin -dotdir test/rom.s -o test/rom.bin
