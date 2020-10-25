@@ -10,10 +10,12 @@
 #define BENCHMARK 0
 
 void run_vm(const char* rom_path);
+void run_nestest();
 
 int main(int argc, char** argv)
 {
-    run_vm("test/rom.bin");
+//    run_vm("test/rom.bin");
+    run_nestest();
     return 0;
 }
 
@@ -144,4 +146,91 @@ void run_vm(const char* rom_path)
 
     free(rom);
     free(ram);
+}
+
+
+void run_nestest()
+{
+    uint8_t* memory = (uint8_t*)malloc(32768*2);
+    FILE* log = fopen("test/nestest.log", "r");
+    if (log)
+    {
+        cpu_state cpu = cpu_reset();
+        cpu.PC = 0xC000;
+        cpu.address = cpu.PC++;
+        cpu.S = 0xFD;
+        cpu.P = 0x24;
+        cpu.cycle = 0;
+
+        while (!feof(log))
+        {
+            uint32_t addr;
+            char opcodes[8];
+            char* current_opcode_str = opcodes;
+            char asembly[31];
+            char rest[255];
+            fscanf(log, "%4X  %8c  %31c", &addr, opcodes, asembly); 
+            fgets(rest, 255, log);
+
+            uint32_t current_opcode = 0;
+            while ((current_opcode_str - opcodes) < 8)
+            {
+                char c = *current_opcode_str++;
+                if (c != ' ')
+                {
+                    uint8_t res = 0, res2;
+                    if (c >= 'A')
+                        res = ((c - 'A') + 10);
+                    else if (c >= '0')
+                        res = c - '0';
+
+                    c = *current_opcode_str++;
+                    if (c >= 'A')
+                        res2 = ((c - 'A') + 10);
+                    else if (c >= '0')
+                        res2 = c - '0';
+
+                    memory[addr + current_opcode++] = (res << 4) | (res2);
+                }
+            }
+        }
+        fseek(log, 0, SEEK_SET);
+        while (!feof(log))
+        {
+            uint32_t addr;
+            char opcodes[8];
+            char* current_opcode_str = opcodes;
+            char asembly[31];
+            char rest[255];
+            int i;
+            fscanf(log, "%4X  %8c  %31c", &addr, opcodes, asembly); 
+            fgets(rest, 255, log);
+
+            {
+                printf("PC: %4X \tLOG: %4X %s\nmA: %2X mX: %2X mY: %2X mP: %2X mSP: %2X -- %s\n\n", (cpu.PC - 1), addr, asembly, cpu.A, cpu.X, cpu.Y, cpu.P, cpu.S, rest);
+            }
+            if ((cpu.PC - 1) != addr)
+            {
+                puts("Error");
+                break;
+            }
+
+            do
+            {
+                if (cpu.rw)
+                {
+                    memory[cpu.address] = cpu.data;
+                }
+                else
+                {
+                    cpu.data = memory[cpu.address];
+                }
+                cpu = cpu_execute(cpu);
+            }
+            while ((cpu.cycle & 0xFF) != 0);
+        }
+        fclose(log);
+    }
+    
+    free(memory);
 }

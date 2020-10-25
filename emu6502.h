@@ -4,6 +4,9 @@
 #include "emu6502_opcodes.h"
 #include <stdint.h>
 #include <memory.h>
+#include <unistd.h>
+
+#include <stdio.h>
 
 struct cpu_state_
 {
@@ -21,6 +24,7 @@ struct cpu_state_
     uint8_t  rw     : 1;
     uint8_t  irq    : 1;
     uint8_t  nmi    : 1;
+    uint8_t  in_nmi : 1;
     uint8_t  data;
 
     // registers
@@ -71,14 +75,16 @@ typedef struct cpu_state_ cpu_state;
 
 #define _CPU_ADC(cpu) {\
     uint16_t tmp = ((uint16_t)cpu.A) + cpu.data + (cpu.P & 1);\
+    uint8_t overflow = (((cpu.data ^ tmp) & (cpu.A ^ tmp)) & 0x80) >> 1;\
+    _CPU_SET_REG_P(cpu, (cpu.P & 0xBE) | ((tmp >> 8) & 1) | overflow);\
     _CPU_SET_REG_A(cpu, tmp & 0xFF);\
-    _CPU_SET_REG_P(cpu, (cpu.P & 0xFE) | ((tmp >> 8) & 1));\
 }
 
 #define _CPU_SBC(cpu) {\
     uint16_t tmp = ((uint16_t)cpu.A) + ~cpu.data + (cpu.P & 1);\
+    uint8_t overflow = (((~cpu.data ^ tmp) & (cpu.A ^ tmp)) & 0x80) >> 1;\
+    _CPU_SET_REG_P(cpu, (cpu.P & 0xBE) | ((~tmp >> 8) & 1) | overflow);\
     _CPU_SET_REG_A(cpu, tmp & 0xFF);\
-    _CPU_SET_REG_P(cpu, (cpu.P & 0xFE) | ((~tmp >> 8) & 1));\
 }
 
 #define _CPU_CMP(cpu, reg) {\
@@ -117,6 +123,11 @@ typedef struct cpu_state_ cpu_state;
     cpu.P = (cpu.P & 0x7D) | (v?0:0x02);\
 }
 
+#define _CPU_LAX(cpu) {\
+    cpu.A = cpu.data;\
+    _CPU_SET_REG_X(cpu, cpu.data);\
+}
+
 static cpu_state cpu_reset()
 {
     cpu_state state;
@@ -137,12 +148,12 @@ static cpu_state cpu_execute(cpu_state state)
         switch (state.data)
         {
             case IC_BRK:
-                _CPU_SET_REG_P(state, state.P | 0x10);
+                _CPU_SET_REG_P(state, state.P | 0x30);
                 return state;
             case IC_PHP:
                 _CPU_SET_WRITE(state);
                 state.address = ((uint8_t)state.S--) + 0x0100;
-                state.data = state.P;
+                state.data = state.P | 0x30; // why push IRQB disable bit?
                 return state;
             case IC_PHA:
                 _CPU_SET_WRITE(state);
@@ -219,10 +230,174 @@ static cpu_state cpu_execute(cpu_state state)
                 _CPU_SET_REG_P(state, state.P | 0x08);
                 return state;
             case IC_NOP: 
+            case IC_IL_NOP_IMM0:
+            case IC_IL_NOP_IMM1:
+            case IC_IL_NOP_IMM2:
+            case IC_IL_NOP_IMM3:
+            case IC_IL_NOP_IMM4:
+            case IC_IL_NOP_IMM5:
                 return state;
-            default: 
+                // DEFAULTS
+            case IC_BCC:
+            case IC_BCS:
+            case IC_BNE:
+            case IC_BEQ:
+            case IC_BVC:
+            case IC_BVS:
+            case IC_BPL:
+            case IC_BMI:
+            case IC_JMP:
+            case IC_JMP_IND:
+            case IC_BIT_ABS:
+            case IC_BIT_ZP: 
+            case IC_LDA_IMM: 
+            case IC_LDA_ABS: 
+            case IC_LDA_ABS_X: 
+            case IC_LDA_ABS_Y:
+            case IC_LDA_ZP: 
+            case IC_LDA_ZP_X: 
+            case IC_LDA_IND_X: 
+            case IC_LDA_IND_Y:
+            case IC_LDX_IMM: 
+            case IC_LDX_ABS: 
+            case IC_LDX_ABS_Y:
+            case IC_LDX_ZP: 
+            case IC_LDX_ZP_Y:
+            case IC_LDY_IMM:
+            case IC_LDY_ABS: 
+            case IC_LDY_ABS_X:
+            case IC_LDY_ZP: 
+            case IC_LDY_ZP_X:
+            case IC_STA_ABS: 
+            case IC_STA_ABS_X:
+            case IC_STA_ABS_Y: 
+            case IC_STA_ZP: 
+            case IC_STA_ZP_X: 
+            case IC_STA_IND_X: 
+            case IC_STA_IND_Y:
+            case IC_STX_ABS: 
+            case IC_STX_ZP: 
+            case IC_STX_ZP_Y:
+            case IC_STY_ABS: 
+            case IC_STY_ZP: 
+            case IC_STY_ZP_X:
+            case IC_ROL_ABS: 
+            case IC_ROL_ABS_X: 
+            case IC_ROL_ZP: 
+            case IC_ROL_ZP_X: 
+            case IC_ROR_ABS: 
+            case IC_ROR_ABS_X: 
+            case IC_ROR_ZP: 
+            case IC_ROR_ZP_X: 
+            case IC_DEC_ABS: 
+            case IC_DEC_ABS_X: 
+            case IC_DEC_ZP: 
+            case IC_DEC_ZP_X:
+            case IC_INC_ABS: 
+            case IC_INC_ABS_X: 
+            case IC_INC_ZP: 
+            case IC_INC_ZP_X:
+            case IC_ASL_ABS: 
+            case IC_ASL_ABS_X: 
+            case IC_ASL_ZP: 
+            case IC_ASL_ZP_X: 
+            case IC_LSR_ABS: 
+            case IC_LSR_ABS_X: 
+            case IC_LSR_ZP: 
+            case IC_LSR_ZP_X: 
+            case IC_AND_IMM: 
+            case IC_AND_ABS: 
+            case IC_AND_ABS_X: 
+            case IC_AND_ABS_Y:
+            case IC_AND_ZP: 
+            case IC_AND_ZP_X: 
+            case IC_AND_IND_X: 
+            case IC_AND_IND_Y: 
+            case IC_ORA_IMM: 
+            case IC_ORA_ABS: 
+            case IC_ORA_ABS_X: 
+            case IC_ORA_ABS_Y: 
+            case IC_ORA_ZP: 
+            case IC_ORA_ZP_X: 
+            case IC_ORA_IND_X: 
+            case IC_ORA_IND_Y: 
+            case IC_EOR_IMM: 
+            case IC_EOR_ABS: 
+            case IC_EOR_ABS_X: 
+            case IC_EOR_ABS_Y: 
+            case IC_EOR_ZP: 
+            case IC_EOR_ZP_X: 
+            case IC_EOR_IND_X: 
+            case IC_EOR_IND_Y:
+            case IC_ADC_IMM: 
+            case IC_ADC_ABS: 
+            case IC_ADC_ABS_X: 
+            case IC_ADC_ABS_Y:
+            case IC_ADC_ZP: 
+            case IC_ADC_ZP_X: 
+            case IC_ADC_IND_X: 
+            case IC_ADC_IND_Y: 
+            case IC_SBC_IMM: 
+            case IC_SBC_ABS: 
+            case IC_SBC_ABS_X: 
+            case IC_SBC_ABS_Y: 
+            case IC_SBC_ZP: 
+            case IC_SBC_ZP_X: 
+            case IC_SBC_IND_X: 
+            case IC_SBC_IND_Y:
+            case IC_CMP_IMM: 
+            case IC_CMP_ABS: 
+            case IC_CMP_ABS_X:
+            case IC_CMP_ABS_Y:
+            case IC_CMP_ZP: 
+            case IC_CMP_ZP_X: 
+            case IC_CMP_IND_X:
+            case IC_CMP_IND_Y:
+            case IC_CPX_IMM:
+            case IC_CPX_ABS:
+            case IC_CPX_ZP:
+            case IC_CPY_IMM:
+            case IC_CPY_ABS:
+            case IC_CPY_ZP:
+            case IC_JSR:    
+            case IC_IL_NOP_ZP0:
+            case IC_IL_NOP_ZP1:
+            case IC_IL_NOP_ZP2:
+            case IC_IL_NOP_ABS:
+            case IC_IL_NOP_ABS_X0:
+            case IC_IL_NOP_ABS_X1:
+            case IC_IL_NOP_ABS_X2:
+            case IC_IL_NOP_ABS_X3:
+            case IC_IL_NOP_ABS_X4:
+            case IC_IL_NOP_ABS_X5:
+            case IC_IL_NOP_ZP_X0:
+            case IC_IL_NOP_ZP_X1:
+            case IC_IL_NOP_ZP_X2:
+            case IC_IL_NOP_ZP_X3:
+            case IC_IL_NOP_ZP_X4:
+            case IC_IL_NOP_ZP_X5:
+            case IC_IL_NOP_IMP0:
+            case IC_IL_NOP_IMP1:
+            case IC_IL_NOP_IMP2:
+            case IC_IL_NOP_IMP3:
+            case IC_IL_NOP_IMP4:
+            case IC_IL_LAX_ABS:
+            case IC_IL_LAX_ABS_Y:
+            case IC_IL_LAX_ZP:
+            case IC_IL_LAX_ZP_Y:
+            case IC_IL_LAX_IND_X:
+            case IC_IL_LAX_IND_Y:
+            case IC_IL_SAX_ABS:
+            case IC_IL_SAX_ZP:
+            case IC_IL_SAX_ZP_Y:
+            case IC_IL_SAX_IND_X:
+            case IC_IL_SBC_IMM:
                 _CPU_FETCH_OPERAND(state);
                 return state;
+                // END DEFAULTS
+            default: 
+                printf("Unknown instruction: 0x%02X\n", state.data);
+                break;
         }
     }
     else if (cycle == 1)
@@ -242,6 +417,7 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_LDA_IMM: _CPU_SET_REG_A(state, state.data); break;
             case IC_LDX_IMM: _CPU_SET_REG_X(state, state.data); break;
             case IC_LDY_IMM: _CPU_SET_REG_Y(state, state.data); break;
+            case IC_IL_SBC_IMM:
             case IC_SBC_IMM: _CPU_SBC(state); break;
             case IC_CMP_IMM: _CPU_CMP(state, state.A); break;
             case IC_CPX_IMM: _CPU_CMP(state, state.X); break;
@@ -301,6 +477,16 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_EOR_ABS_X:
             case IC_EOR_ABS_Y:
             case IC_BIT_ABS:
+            case IC_IL_NOP_ABS:
+            case IC_IL_NOP_ABS_X0:
+            case IC_IL_NOP_ABS_X1:
+            case IC_IL_NOP_ABS_X2:
+            case IC_IL_NOP_ABS_X3:
+            case IC_IL_NOP_ABS_X4:
+            case IC_IL_NOP_ABS_X5:
+            case IC_IL_LAX_ABS:
+            case IC_IL_LAX_ABS_Y:
+            case IC_IL_SAX_ABS:
                 _CPU_LATCH_ADDR(state);
                 _CPU_FETCH_OPERAND(state);
                 return state;
@@ -322,6 +508,10 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_AND_ZP:
             case IC_ORA_ZP:
             case IC_EOR_ZP:
+            case IC_IL_NOP_ZP0:
+            case IC_IL_NOP_ZP1:
+            case IC_IL_NOP_ZP2:
+            case IC_IL_LAX_ZP:
                 state.address = state.data;
                 return state;
             case IC_LDA_ZP_X:
@@ -338,10 +528,17 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_AND_ZP_X:
             case IC_ORA_ZP_X:
             case IC_EOR_ZP_X:
-                state.address = state.data + state.X;
+            case IC_IL_NOP_ZP_X0:
+            case IC_IL_NOP_ZP_X1:
+            case IC_IL_NOP_ZP_X2:
+            case IC_IL_NOP_ZP_X3:
+            case IC_IL_NOP_ZP_X4:
+            case IC_IL_NOP_ZP_X5:
+                state.address = (state.data + state.X) & 0xFF;
                 return state; 
             case IC_LDX_ZP_Y:
-                state.address = state.data + state.Y;
+            case IC_IL_LAX_ZP_Y:
+                state.address = (state.data + state.Y) & 0xFF;
                 return state;
             case IC_STA_ZP:
                 _CPU_SET_WRITE(state);
@@ -350,7 +547,7 @@ static cpu_state cpu_execute(cpu_state state)
                 return state;
             case IC_STA_ZP_X:
                 _CPU_SET_WRITE(state);
-                state.address = state.data + state.X;
+                state.address = (state.data + state.X) & 0xFF;
                 state.data = state.A;
                 return state;
             case IC_STX_ZP:
@@ -360,7 +557,7 @@ static cpu_state cpu_execute(cpu_state state)
                 return state;
             case IC_STX_ZP_Y:
                 _CPU_SET_WRITE(state);
-                state.address = state.data + state.Y;
+                state.address = (state.data + state.Y) & 0xFF;
                 state.data = state.X;
                 return state;
             case IC_STY_ZP:
@@ -370,8 +567,18 @@ static cpu_state cpu_execute(cpu_state state)
                 return state;
             case IC_STY_ZP_X:
                 _CPU_SET_WRITE(state);
-                state.address = state.data + state.X;
+                state.address = (state.data + state.X) & 0xFF;
                 state.data = state.Y;
+                return state;
+            case IC_IL_SAX_ZP:
+                _CPU_SET_WRITE(state);
+                state.address = state.data;
+                state.data = state.A & state.X;
+                return state;
+            case IC_IL_SAX_ZP_Y:
+                _CPU_SET_WRITE(state);
+                state.address = (state.data + state.Y) & 0xFF;
+                state.data = state.A & state.X;
                 return state;
             case IC_LDA_IND_X:
             case IC_STA_IND_X:
@@ -381,7 +588,9 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_AND_IND_X:
             case IC_ORA_IND_X:
             case IC_EOR_IND_X:
-                state.address = state.data + state.X;
+            case IC_IL_LAX_IND_X:
+            case IC_IL_SAX_IND_X:
+                state.address = (state.data + state.X) & 0xFF;
                 return state;
             case IC_LDA_IND_Y:
             case IC_STA_IND_Y:
@@ -391,6 +600,7 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_AND_IND_Y:
             case IC_ORA_IND_Y:
             case IC_EOR_IND_Y:
+            case IC_IL_LAX_IND_Y:
                 state.address = state.data;
                 return state;
             case IC_JSR:
@@ -411,7 +621,7 @@ static cpu_state cpu_execute(cpu_state state)
                 _CPU_SET_REG_A(state, state.data);
                 return state;
             case IC_PLP:
-                _CPU_SET_REG_P(state, state.data);
+                _CPU_SET_REG_P(state, state.data & 0xEF);
                 return state;
             default:
                 break;
@@ -443,6 +653,8 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_ORA_ABS:
             case IC_EOR_ABS:
             case IC_BIT_ABS:
+            case IC_IL_NOP_ABS:
+            case IC_IL_LAX_ABS:
                 state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 return state;
             case IC_LDA_ABS_X:
@@ -459,6 +671,12 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_AND_ABS_X:
             case IC_ORA_ABS_X:
             case IC_EOR_ABS_X:
+            case IC_IL_NOP_ABS_X0:
+            case IC_IL_NOP_ABS_X1:
+            case IC_IL_NOP_ABS_X2:
+            case IC_IL_NOP_ABS_X3:
+            case IC_IL_NOP_ABS_X4:
+            case IC_IL_NOP_ABS_X5:
                 state.address = ((state.data << 8) | _CPU_GET_LATCH_ADDR(state)) + state.X;
                 return state;
             case IC_LDA_ABS_Y:
@@ -469,6 +687,7 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_AND_ABS_Y:
             case IC_ORA_ABS_Y:
             case IC_EOR_ABS_Y:
+            case IC_IL_LAX_ABS_Y:
                 state.address = ((state.data << 8) | _CPU_GET_LATCH_ADDR(state)) + state.Y;
                 return state;
             case IC_STA_ABS:
@@ -496,6 +715,11 @@ static cpu_state cpu_execute(cpu_state state)
                 state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 state.data = state.Y;
                 return state;
+            case IC_IL_SAX_ABS:
+                _CPU_SET_WRITE(state);
+                state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
+                state.data = state.A & state.X;
+                return state;
             case IC_LDA_IND_X:
             case IC_LDA_IND_Y:
             case IC_STA_IND_X:
@@ -512,8 +736,11 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_ORA_IND_Y:
             case IC_EOR_IND_X:
             case IC_EOR_IND_Y:
+            case IC_IL_LAX_IND_X:
+            case IC_IL_LAX_IND_Y:
+            case IC_IL_SAX_IND_X:
                 _CPU_LATCH_ADDR(state);
-                state.address +=1;
+                state.address = (state.address + 1) & 0xFF;
                 return state;
             case IC_JMP:
                 state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
@@ -534,6 +761,7 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_AND_ZP: _CPU_SET_REG_A(state, state.A & state.data); break;
             case IC_ORA_ZP: _CPU_SET_REG_A(state, state.A | state.data); break;
             case IC_EOR_ZP: _CPU_SET_REG_A(state, state.A ^ state.data); break;
+            case IC_IL_LAX_ZP: _CPU_LAX(state); break;
             case IC_LDA_ZP_X:
                 _CPU_SET_REG_A(state, state.data);
                 return state; 
@@ -542,6 +770,9 @@ static cpu_state cpu_execute(cpu_state state)
                 return state;
             case IC_LDX_ZP_Y:
                 _CPU_SET_REG_X(state, state.data);
+                return state;
+            case IC_IL_LAX_ZP_Y:
+                _CPU_LAX(state);
                 return state;
             case IC_JSR:
                 _CPU_SET_WRITE(state);
@@ -576,6 +807,13 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_AND_ZP_X:
             case IC_ORA_ZP_X:
             case IC_EOR_ZP_X:
+            case IC_IL_NOP_ZP_X0:
+            case IC_IL_NOP_ZP_X1:
+            case IC_IL_NOP_ZP_X2:
+            case IC_IL_NOP_ZP_X3:
+            case IC_IL_NOP_ZP_X4:
+            case IC_IL_NOP_ZP_X5:
+            case IC_IL_SAX_ZP_Y:
                 // empty cycles
                 _CPU_SET_READ(state);
                 return state;
@@ -641,6 +879,10 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_LDX_ABS_Y:
                 _CPU_SET_REG_X(state, state.data);
                 break;
+            case IC_IL_LAX_ABS:
+            case IC_IL_LAX_ABS_Y:
+                _CPU_LAX(state);
+                break;
             case IC_LDY_ABS:
             case IC_LDY_ABS_X:
                 _CPU_SET_REG_Y(state, state.data);
@@ -697,6 +939,7 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_AND_IND_X:
             case IC_ORA_IND_X:
             case IC_EOR_IND_X:
+            case IC_IL_LAX_IND_X:
                 state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 return state;
             case IC_LDA_IND_Y:
@@ -706,6 +949,7 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_AND_IND_Y:
             case IC_ORA_IND_Y:
             case IC_EOR_IND_Y:
+            case IC_IL_LAX_IND_Y:
                 state.address = ((state.data << 8) | _CPU_GET_LATCH_ADDR(state)) + state.Y;
                 return state;
             case IC_STA_IND_X:
@@ -718,18 +962,26 @@ static cpu_state cpu_execute(cpu_state state)
                 state.address = ((state.data << 8) | _CPU_GET_LATCH_ADDR(state)) + state.Y;
                 state.data = state.A;
                 return state;
+            case IC_IL_SAX_IND_X:
+                _CPU_SET_WRITE(state);
+                state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
+                state.data = state.A & state.X;
+                return state;
             case IC_JMP_IND:
                 _CPU_LATCH_ADDR(state);
-                state.address += 1;
+                state.address = (state.address & 0xFF00) | ((state.address + 1) & 0x00FF);
                 return state;
             case IC_JSR:
                 state.data = state.PC & 0xFF;
                 state.address = ((uint8_t)state.S--) + 0x0100;
                 return state;
-           case IC_RTS:
-           case IC_RTI:
+            case IC_RTS:
                 state.PC = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 state.address = ++state.PC;
+                return state;
+            case IC_RTI:
+                state.PC = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
+                state.address = state.PC;
                 return state;
             case IC_STA_ABS_X:
             case IC_STA_ABS_Y:
@@ -745,11 +997,20 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_BRK:
                 _CPU_SET_READ(state);
                 if (state.nmi)
+                {
+                    state.nmi = 0;
+                    state.in_nmi = 1;
                     state.address = 0xFFFA;
+                }
                 else if (state.irq || (state.P & 0x10))
+                {
+                    _CPU_SET_REG_P(state, state.P | 0x4);
                     state.address = 0xFFFE;
+                }
                 else
+                {
                     state.address = 0xfffc;
+                }
                 return state;
             case IC_LDA_IND_X: _CPU_SET_REG_A(state, state.data); return state;
             case IC_ADC_IND_X: _CPU_ADC(state); return state;
@@ -758,6 +1019,7 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_AND_IND_X: _CPU_SET_REG_A(state, state.A & state.data); return state;
             case IC_ORA_IND_X: _CPU_SET_REG_A(state, state.A | state.data); return state;
             case IC_EOR_IND_X: _CPU_SET_REG_A(state, state.A ^ state.data); return state;
+            case IC_IL_LAX_IND_X: _CPU_LAX(state); return state;
             case IC_LDA_IND_Y: _CPU_SET_REG_A(state, state.data); break;
             case IC_ADC_IND_Y: _CPU_ADC(state); break;
             case IC_SBC_IND_Y: _CPU_SBC(state); break;
@@ -765,6 +1027,7 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_AND_IND_Y: _CPU_SET_REG_A(state, state.A & state.data); break;
             case IC_ORA_IND_Y: _CPU_SET_REG_A(state, state.A | state.data); break;
             case IC_EOR_IND_Y: _CPU_SET_REG_A(state, state.A ^ state.data); break;
+            case IC_IL_LAX_IND_Y: _CPU_LAX(state); break;
             case IC_JMP_IND:
                 state.address = (state.data << 8) | _CPU_GET_LATCH_ADDR(state);
                 state.PC = state.address;
@@ -794,6 +1057,7 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_STA_IND_Y:
             case IC_RTS:
             case IC_RTI:
+            case IC_IL_SAX_IND_X:
                 // empty cycles
                 _CPU_SET_READ(state);
                 return state;
@@ -820,6 +1084,10 @@ static cpu_state cpu_execute(cpu_state state)
                 // empty cycle
                 _CPU_SET_READ(state);
                 return state;
+            case IC_RTI:
+                if (state.in_nmi)
+                    state.in_nmi = 0;
+                break;
         }
     }
     else if (cycle == 6)
@@ -832,19 +1100,25 @@ static cpu_state cpu_execute(cpu_state state)
 
     _CPU_END(state);
 
-    if (state.irq || state.nmi)
+    if (state.nmi)
     {
+//        printf("Entering IRQ-nmi\n");
         state.data = 0;
         state.cycle += 1;
         _CPU_SET_INSTRUCTION(state);
-        _CPU_SET_WRITE(state);
         return state;
     }
-    else
+    else if (state.irq && (state.P & 0x4) == 0)
     {
-        _CPU_FETCH_INSTRUCTION(state);
+        printf("Entering IRQ request\n");
+        state.data = 0;
+        state.cycle += 1;
+        _CPU_SET_INSTRUCTION(state);
         return state;
     }
+
+    _CPU_FETCH_INSTRUCTION(state);
+    return state;
 }
 
 #endif

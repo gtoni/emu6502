@@ -176,4 +176,48 @@
 #define IC_RTS      0x60
 #define IC_RTI      0x40
 
+// Illegal codes
+#define IC_IL_NOP_ZP0        0x04
+#define IC_IL_NOP_ZP1        0x44
+#define IC_IL_NOP_ZP2        0x64
+#define IC_IL_NOP_ABS        0x0C
+#define IC_IL_NOP_ABS_X0     0x1C
+#define IC_IL_NOP_ABS_X1     0x3C
+#define IC_IL_NOP_ABS_X2     0x5C
+#define IC_IL_NOP_ABS_X3     0x7C
+#define IC_IL_NOP_ABS_X4     0xDC
+#define IC_IL_NOP_ABS_X5     0xFC
+#define IC_IL_NOP_ZP_X0      0x14
+#define IC_IL_NOP_ZP_X1      0x34
+#define IC_IL_NOP_ZP_X2      0x54
+#define IC_IL_NOP_ZP_X3      0x74
+#define IC_IL_NOP_ZP_X4      0xD4
+#define IC_IL_NOP_ZP_X5      0xF4
+#define IC_IL_NOP_IMM0       0x1A
+#define IC_IL_NOP_IMM1       0x3A
+#define IC_IL_NOP_IMM2       0x5A
+#define IC_IL_NOP_IMM3       0x7A
+#define IC_IL_NOP_IMM4       0xDA
+#define IC_IL_NOP_IMM5       0xFA
+#define IC_IL_NOP_IMP0       0x80
+#define IC_IL_NOP_IMP1       0x82
+#define IC_IL_NOP_IMP2       0x89
+#define IC_IL_NOP_IMP3       0xC2
+#define IC_IL_NOP_IMP4       0xE2
+
+#define IC_IL_LAX_ABS        0xAF
+#define IC_IL_LAX_ABS_Y      0xBF
+#define IC_IL_LAX_ZP         0xA7
+#define IC_IL_LAX_ZP_Y       0xB7
+#define IC_IL_LAX_IND_X      0xA3
+#define IC_IL_LAX_IND_Y      0xB3
+
+#define IC_IL_SAX_ABS        0x8F
+#define IC_IL_SAX_ZP         0x87
+#define IC_IL_SAX_ZP_Y       0x97
+#define IC_IL_SAX_IND_X      0x83
+
+#define IC_IL_SBC_IMM        0xEB
+
+
 #endif
