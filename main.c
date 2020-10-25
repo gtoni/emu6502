@@ -35,8 +35,6 @@ void run_vm(const char* rom_path)
     uint8_t*        ram = (uint8_t*)malloc(32768);
     uint32_t        counter = 0;
 
-    size_t test = sizeof(cpu_state);
-
     uint8_t         display[256] = {0xff};
     int             update_display = 0;
     struct winsize  w;
@@ -73,31 +71,31 @@ void run_vm(const char* rom_path)
 
     while(1)
     {
-        uint8_t* memory = ram;
-        uint16_t address = cpu.address;
+        if (cpu.rw_mode != CPU_RW_MODE_NONE)
+        {
+            uint8_t* memory  = ram;
+            uint16_t address = cpu.address;
+            int write = (cpu.rw_mode == CPU_RW_MODE_WRITE);
 
-        /* Chip select */
-        if (address & 0x8000)
-        {
-            memory = rom;
-            address = address & 0x7fff;
-        }
-        else if (address >= 0x4000 && address <= (0x4000 + sizeof(display)))
-        {
-            memory = display;
-            address -= 0x4000;
-        }
-        
-        /* Memory read/write */
-        if (CPU_IS_WRITE(cpu))
-        {
-            memory[address] = cpu.data;
-            if (memory == display)
-                update_display = 1;
-        }
-        else
-        {
-            cpu.data = memory[address];
+            /* Chip select */
+            if (address & 0x8000)
+            {
+                memory = rom;
+                address = address & 0x7fff;
+            }
+            else if (address >= 0x4000 && address <= (0x4000 + sizeof(display)))
+            {
+                memory = display;
+                address -= 0x4000;
+                if (write)
+                    update_display = 1;
+            }
+
+            /* Perform I/O */
+            if (write)
+                memory[address] = cpu.data;
+            else
+                cpu.data = memory[address];
         }
 
         /* Run CPU */
@@ -156,8 +154,8 @@ void run_nestest()
     if (log)
     {
         cpu_state cpu = cpu_reset();
-        cpu.PC = 0xC000;
-        cpu.address = cpu.PC++;
+        cpu.address = cpu.PC = 0xC000;
+        cpu.rw_mode = CPU_RW_MODE_READ;
         cpu.S = 0xFD;
         cpu.P = 0x24;
         cpu.cycle = 0;
@@ -167,9 +165,10 @@ void run_nestest()
             uint32_t addr;
             char opcodes[8];
             char* current_opcode_str = opcodes;
-            char asembly[31];
+            char asembly[32];
             char rest[255];
-            fscanf(log, "%4X  %8c  %31c", &addr, opcodes, asembly); 
+            fscanf(log, "%4X  %8c  %32c", &addr, opcodes, asembly); 
+            asembly[31] = 0;
             fgets(rest, 255, log);
 
             uint32_t current_opcode = 0;
@@ -198,18 +197,22 @@ void run_nestest()
         while (!feof(log))
         {
             uint32_t addr;
+            unsigned int A, X, Y, P, SP;
             char opcodes[8];
             char* current_opcode_str = opcodes;
-            char asembly[31];
+            char asembly[32];
             char rest[255];
             int i;
-            fscanf(log, "%4X  %8c  %31c", &addr, opcodes, asembly); 
+            fscanf(log, "%4X  %8c  %32c", &addr, opcodes, asembly); 
+            asembly[31] = 0;
             fgets(rest, 255, log);
 
-            {
-                printf("PC: %4X \tLOG: %4X %s\nmA: %2X mX: %2X mY: %2X mP: %2X mSP: %2X -- %s\n\n", (cpu.PC - 1), addr, asembly, cpu.A, cpu.X, cpu.Y, cpu.P, cpu.S, rest);
-            }
-            if ((cpu.PC - 1) != addr)
+            sscanf(rest, " A:%02X X:%02X Y:%02X P:%02X SP:%02X", &A, &X, &Y, &P, &SP);
+
+            printf("PC: %04X \tLOG: %04X %s\nmA: %02X mX: %02X mY: %02X mP: %02X mSP: %02X -- ", cpu.PC, addr, asembly, cpu.A, cpu.X, cpu.Y, cpu.P, cpu.S);
+            printf("A:%02X X:%02X Y:%02X P:%02X S:%02X\n\n", A, X, Y, P, SP);
+
+            if (cpu.PC != addr || cpu.A != A || cpu.X != X || cpu.Y != Y || cpu.P != P || cpu.S != SP || (memory[2] || memory[3]))
             {
                 puts("Error");
                 break;
@@ -217,14 +220,13 @@ void run_nestest()
 
             do
             {
-                if (cpu.rw)
+                switch (cpu.rw_mode)
                 {
-                    memory[cpu.address] = cpu.data;
+                    case CPU_RW_MODE_NONE:  break;
+                    case CPU_RW_MODE_READ:  cpu.data = memory[cpu.address]; break;
+                    case CPU_RW_MODE_WRITE: memory[cpu.address] = cpu.data; break;
                 }
-                else
-                {
-                    cpu.data = memory[cpu.address];
-                }
+
                 cpu = cpu_execute(cpu);
             }
             while ((cpu.cycle & 0xFF) != 0);
