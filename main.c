@@ -7,15 +7,19 @@
 #include <time.h>
 #include "emu6502.h"
 
-#define BENCHMARK 0
+#define BENCHMARK 1
 
 void run_vm(const char* rom_path);
 void run_nestest();
 
 int main(int argc, char** argv)
 {
-//    run_vm("test/rom.bin");
+#if BENCHMARK
+    run_vm("test/rom.bin");
+#else
+    //run_vm("test/rom.bin");
     run_nestest();
+#endif
     return 0;
 }
 
@@ -38,7 +42,12 @@ void run_vm(const char* rom_path)
     uint8_t         display[256] = {0xff};
     int             update_display = 0;
     struct winsize  w;
-    uint64_t        time = 0;
+    uint64_t        sample_time = 0;
+    uint64_t        cycle_time[7] = {0,0,0,0,0,0,0};
+    uint64_t        alu_time = 0;
+    uint64_t        load_addr_time = 0;
+
+    size_t test_size = sizeof(cpu);
     
     stat(rom_path, &rom_stat);
 
@@ -99,22 +108,59 @@ void run_vm(const char* rom_path)
         }
 
         /* Run CPU */
-        cpu = cpu_execute(cpu);
+        {
+            int cycle = cpu.cycle;
+            int has_alu = _CPU_ALU_OP(cpu.pipeline) != 0;
+            int has_load_addr = _CPU_LOAD_ADDR_OP(cpu.pipeline) != 0;
+
+            uint64_t t0 = time_ns();
+            cpu = cpu_execute(cpu);
+            uint64_t diff = time_ns() - t0;
+        
+            if (has_alu && _CPU_ALU_OP(cpu.pipeline) == 0)
+                alu_time += diff;
+
+            if (has_load_addr && _CPU_LOAD_ADDR_OP(cpu.pipeline) == 0)
+                load_addr_time += diff;
+
+            cycle_time[cycle] += diff;
+            sample_time += diff;
+        }
 
         if (++counter)
         {
 #if BENCHMARK == 1
             if (counter == 1000000)
             {
-                uint64_t sample_time = time_ns() - time;
                 uint64_t ns_per_cycle = sample_time / counter;
                 uint64_t cycles_per_mcs = 1000000ULL / ns_per_cycle;
                 float freqMHz = ((float)cycles_per_mcs) / 1000.0f;
+
                 counter = 0;
-                printf("freq: %.3f MHz time: %u mcs\n", freqMHz, ((uint32_t)(sample_time /1000ULL)));
+                printf("freq: %.3f MHz time: %u mcs ", freqMHz, ((uint32_t)(sample_time /1000ULL)));
+
+                for (int i = 0; i < 7; ++i)
+                {
+                    float cycle_percent = 100.0f * ((float)(cycle_time[i] / 100000ULL) / (float)(sample_time / 100000ULL));
+                    printf("c%d: %.1f ", i, cycle_percent);
+                    cycle_time[i] = 0;
+                }
+                {
+                    float alu_percent = 100.0f * ((float)(alu_time / 100000ULL) / (float)(sample_time / 100000ULL));
+                    printf("alu: %.1f ", alu_percent);
+                }
+                {
+                    float addr_percent = 100.0f * ((float)(load_addr_time / 100000ULL) / (float)(sample_time / 100000ULL));
+                    printf("addr: %.1f ", addr_percent);
+                }
+
+                printf("\n");
+
                 fflush(stdout);
                 usleep(10);
-                time = time_ns();
+                sample_time = 0;
+                alu_time = 0;
+                load_addr_time = 0;
             }
 #else 
             if ((counter %5) == 0)
@@ -153,12 +199,11 @@ void run_nestest()
     FILE* log = fopen("test/nestest.log", "r");
     if (log)
     {
-        cpu_state cpu = cpu_reset();
+        cpu_state cpu;
         cpu.address = cpu.PC = 0xC000;
         cpu.rw_mode = CPU_RW_MODE_READ;
         cpu.S = 0xFD;
         cpu.P = 0x24;
-        cpu.cycle = 0;
 
         while (!feof(log))
         {
