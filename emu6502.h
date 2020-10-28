@@ -8,10 +8,6 @@
 
 #include <stdio.h>
 
-/*
- * todo: change access_mode to two flags: rw and rw_enable
- */
-
 enum cpu_rw_mode
 {
     CPU_RW_MODE_NONE    = 0,
@@ -32,27 +28,28 @@ enum cpu_status_flags
 
 struct cpu_state_
 {
-    uint32_t cycle; /* contains:
-        0x000000FF     : current cycle
-        0x0000FF00     : current instruction
-        0x00FF0000     : latch address
+    uint16_t cycle; /* contains:
+        0x00FF     : current cycle
+        0xFF00     : current instruction
     */
         
     uint16_t PC;             
     uint8_t  S;
-    uint8_t  Y;
+    uint8_t  P; 
 
     uint16_t address;         
-    uint8_t  rw_mode : 2;
+    uint8_t  rw_mode;
     uint8_t  irq    : 1;
     uint8_t  nmi    : 1;
     uint8_t  in_nmi : 1;
     uint8_t  data;
+    uint8_t  temp;
 
     // registers
     uint8_t  A;
     uint8_t  X;
-    uint8_t  P; 
+    uint8_t  Y;
+
  
     // pins
 /*    
@@ -78,13 +75,13 @@ typedef struct cpu_state_ cpu_state;
 #define _CPU_SET_REG_Y(cpu, v)        _CPU_SET_REG(cpu, Y, v)
 #define _CPU_SET_REG_S(cpu, v)        cpu.S = v
 
-#define _CPU_SET_INSTRUCTION(cpu)   (cpu.cycle = (cpu.cycle & 0xFFFF00FF) | (((uint32_t)cpu.data) << 8))
+#define _CPU_SET_INSTRUCTION(cpu)   (cpu.cycle = (cpu.cycle & 0x00FF) | (((uint32_t)cpu.data) << 8))
 #define _CPU_GET_INSTRUCTION(cpu)   ((cpu.cycle >> 8) & 0xFF)
 
-#define _CPU_LATCH_ADDR(cpu)        (cpu.cycle = (cpu.cycle & 0xFF00FFFF) | (cpu.data<<16))
-#define _CPU_GET_LATCH_ADDR(cpu)    ((cpu.cycle>>16)&0xFF)
+#define _CPU_LATCH_ADDR(cpu)        (cpu.temp = cpu.data)
+#define _CPU_GET_LATCH_ADDR(cpu)    (cpu.temp)
 
-#define _CPU_END(cpu)               {cpu.cycle = cpu.cycle & 0xFFFFFF00;}
+#define _CPU_END(cpu)               {cpu.cycle = 0;}
 #define _CPU_COND_BRANCH(cpu, cond) cpu.PC = (cond)?(cpu.PC + (int8_t)cpu.data) : cpu.PC
 
 #define _CPU_BIT(cpu)               _CPU_SET_REG_P(cpu, (cpu.P & 0x3D) | (cpu.data & 0xC0) | (((cpu.A & cpu.data) == 0)?2:0))
@@ -154,9 +151,9 @@ static cpu_state cpu_reset()
 static cpu_state cpu_execute(cpu_state state)
 {
     uint8_t cycle = state.cycle++;
-    uint8_t instruction = _CPU_GET_INSTRUCTION(state);
+    uint_fast32_t instruction = _CPU_GET_INSTRUCTION(state);
 
-    if (state.rw_mode == CPU_RW_MODE_READ && state.address == state.PC)
+    if (state.address == state.PC && state.rw_mode == CPU_RW_MODE_READ)
     {
         state.PC++;
         state.rw_mode = CPU_RW_MODE_NONE;
@@ -421,7 +418,7 @@ static cpu_state cpu_execute(cpu_state state)
             default: 
                 state.rw_mode = CPU_RW_MODE_READ;
                 state.address = state.PC;
-                printf("Unknown instruction: 0x%02X\n", state.data);
+    //            printf("Unknown instruction: 0x%02X\n", state.data);
                 break;
         }
     }
@@ -1150,14 +1147,7 @@ static cpu_state cpu_execute(cpu_state state)
 
     _CPU_END(state);
 
-    if (state.nmi)
-    {
-        state.data = 0;
-        state.cycle += 1;
-        _CPU_SET_INSTRUCTION(state);
-        return state;
-    }
-    else if (state.irq && !(state.P & CPU_STATUS_FLAG_IRQDISABLE))
+    if (state.nmi || (state.irq && !(state.P & CPU_STATUS_FLAG_IRQDISABLE)))
     {
         state.data = 0;
         state.cycle += 1;
