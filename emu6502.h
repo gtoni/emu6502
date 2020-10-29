@@ -75,9 +75,9 @@ typedef struct cpu_state_ cpu_state;
 
 #define _CPU_COND_BRANCH(cpu, cond) if (cond) {\
     uint16_t newPC = cpu.PC + (int8_t)cpu.data;\
-    cpu.temp = ((newPC & 0xFF00) != (cpu.PC & 0xFF00));\
+    int page_switch = ((newPC & 0xFF00) != (cpu.PC & 0xFF00));\
     cpu.PC = newPC;\
-    return cpu;\
+    if (page_switch) return cpu;\
 }
 
 #define _CPU_BIT(cpu)               _CPU_SET_REG_P(cpu, (cpu.P & 0x3D) | (cpu.data & 0xC0) | (((cpu.A & cpu.data) == 0)?2:0))
@@ -476,11 +476,6 @@ static cpu_state cpu_execute(cpu_state state)
                 state.data = state.PC;
                 state.address = ((uint8_t)state.S--) + 0x0100;
                 return state;
-
-            case IC_BCC: case IC_BCS: case IC_BNE: case IC_BEQ: case IC_BVC: case IC_BVS: case IC_BPL: case IC_BMI:
-                /* if branch was taken and page is crossed wait additional cycle */
-                if (state.temp) return state;
-                break;
 
             case IC_LDA_ABS:
             case IC_LDX_ABS:
@@ -891,7 +886,8 @@ static cpu_state cpu_execute(cpu_state state)
                 return state;
 
             case IC_IL_DCP_IND_X: case IC_IL_DCP_IND_Y:
-                _CPU_DCP(state); return state;
+                _CPU_DCP(state); 
+                return state;
 
             case IC_ROL_ABS: case IC_ROL_ABS_X: case IC_ROL_ZP_X:
             case IC_ROR_ABS: case IC_ROR_ABS_X: case IC_ROR_ZP_X:
