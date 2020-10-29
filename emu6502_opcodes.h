@@ -219,12 +219,20 @@
 
 #define IC_IL_SBC_IMM        0xEB
 
-#define IC_IL_DCP_ABS           0xCF
-#define IC_IL_DCP_ABS_X         0xDF
-#define IC_IL_DCP_ABS_Y         0xDB
-#define IC_IL_DCP_ZP            0xC7
-#define IC_IL_DCP_ZP_X          0xD7
-#define IC_IL_DCP_IND_X         0xC3
-#define IC_IL_DCP_IND_Y         0xD3
+#define IC_IL_DCP_ABS        0xCF
+#define IC_IL_DCP_ABS_X      0xDF
+#define IC_IL_DCP_ABS_Y      0xDB
+#define IC_IL_DCP_ZP         0xC7
+#define IC_IL_DCP_ZP_X       0xD7
+#define IC_IL_DCP_IND_X      0xC3
+#define IC_IL_DCP_IND_Y      0xD3
+
+#define IC_IL_ISB_ABS        0xEF 
+#define IC_IL_ISB_ABS_X      0xFF
+#define IC_IL_ISB_ABS_Y      0xFB
+#define IC_IL_ISB_ZP         0xE7
+#define IC_IL_ISB_ZP_X       0xF7
+#define IC_IL_ISB_IND_X      0xE3
+#define IC_IL_ISB_IND_Y      0xF3
 
 #endif

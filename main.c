@@ -7,6 +7,9 @@
 #include <time.h>
 #include "emu6502.h"
 
+// Before: about 37 Mhz
+//
+
 #define BENCHMARK 0
 
 void run_vm(const char* rom_path);
@@ -14,8 +17,12 @@ void run_nestest();
 
 int main(int argc, char** argv)
 {
-//    run_vm("test/rom.bin");
+#if BENCHMARK
+    run_vm("test/rom.bin");
+#else
+    //run_vm("test/rom.bin");
     run_nestest();
+#endif
     return 0;
 }
 
