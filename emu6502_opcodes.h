@@ -219,5 +219,12 @@
 
 #define IC_IL_SBC_IMM        0xEB
 
+#define IC_IL_DCP_ABS           0xCF
+#define IC_IL_DCP_ABS_X         0xDF
+#define IC_IL_DCP_ABS_Y         0xDB
+#define IC_IL_DCP_ZP            0xC7
+#define IC_IL_DCP_ZP_X          0xD7
+#define IC_IL_DCP_IND_X         0xC3
+#define IC_IL_DCP_IND_Y         0xD3
 
 #endif
