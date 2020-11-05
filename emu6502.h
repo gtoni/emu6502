@@ -161,7 +161,8 @@ static cpu_state cpu_execute(cpu_state state)
         switch (state.data)
         {
             case IC_BRK:
-                _CPU_SET_REG_P(state, state.P | CPU_STATUS_FLAG_BREAK);
+                if (!(state.nmi || state.irq))
+                    _CPU_SET_REG_P(state, state.P | CPU_STATUS_FLAG_BREAK);
                 return state;
             case IC_PHP:
                 state.rw_mode = CPU_RW_MODE_WRITE;
@@ -950,8 +951,8 @@ static cpu_state cpu_execute(cpu_state state)
 
     if (state.nmi || (state.irq && !(state.P & CPU_STATUS_FLAG_IRQDISABLE)))
     {
-        state.cycle = 1;
-        _CPU_SET_INSTRUCTION(state, 0);
+        state.cycle = 0;
+        state.data = 0;
         return state;
     }
 
