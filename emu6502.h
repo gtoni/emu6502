@@ -57,9 +57,13 @@ enum cpu_status_flags
 #define _CPU_GET_INSTRUCTION(cpu)      ((cpu.cycle >> 8) & 0xFF)
 
 #define _CPU_COND_BRANCH(cpu, cond) if (cond) {\
-    uint16_t newPC = cpu.PC + (int8_t)cpu.data;\
-    int page_switch = ((newPC & 0xFF00) != (cpu.PC & 0xFF00));\
-    cpu.PC = newPC;\
+    cpu.address = cpu.PC + (int8_t)cpu.data;\
+    return cpu;\
+}
+
+#define _CPU_COND_BRANCH_TAKEN(cpu) {\
+    int page_switch = ((cpu.address & 0xFF00) != (cpu.PC & 0xFF00));\
+    cpu.PC = cpu.address;\
     if (page_switch) return cpu;\
 }
 
@@ -463,6 +467,10 @@ static cpu_state cpu_execute(cpu_state state)
                 state.data = state.PC;
                 state.address = ((uint8_t)state.S--) + 0x0100;
                 return state;
+
+            case IC_BCC: case IC_BCS: case IC_BNE: case IC_BEQ: case IC_BVC: case IC_BVS: case IC_BPL: case IC_BMI:
+                _CPU_COND_BRANCH_TAKEN(state);
+                break;
 
             case IC_LDA_ABS:
             case IC_LDX_ABS:
