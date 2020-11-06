@@ -62,10 +62,13 @@ enum cpu_status_flags
 }
 
 #define _CPU_COND_BRANCH_TAKEN(cpu) {\
-    int page_switch = ((cpu.address & 0xFF00) != (cpu.PC & 0xFF00));\
+    int page_cross = ((cpu.address & 0xFF00) != (cpu.PC & 0xFF00));\
     cpu.PC = cpu.address;\
-    if (page_switch) return cpu;\
+    if (page_cross) return cpu;\
 }
+
+#define _CPU_CHECK_PAGE_CROSS(cpu) \
+    if (cpu.temp != (cpu.address>>8)) return cpu;
 
 #define _CPU_BIT(cpu)               _CPU_SET_REG_P(cpu, (cpu.P & 0x3D) | (cpu.data & 0xC0) | (((cpu.A & cpu.data) == 0)?2:0))
 
@@ -517,6 +520,7 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_IL_ISB_ABS_X:
                 state.rw_mode = CPU_RW_MODE_READ;
                 state.address = ((state.data << 8) | state.temp) + state.X;
+                state.temp = state.data;
                 return state;
             case IC_LDA_ABS_Y:
             case IC_LDX_ABS_Y:
@@ -531,6 +535,7 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_IL_ISB_ABS_Y:
                 state.rw_mode = CPU_RW_MODE_READ;
                 state.address = ((state.data << 8) | state.temp) + state.Y;
+                state.temp = state.data;
                 return state;
             case IC_STA_ABS:
                 state.rw_mode = CPU_RW_MODE_WRITE;
@@ -678,52 +683,67 @@ static cpu_state cpu_execute(cpu_state state)
                 state.address = ((uint8_t)state.S--) + 0x0100;
                 return state;
 
-            case IC_LDA_ABS: case IC_LDA_ABS_X: case IC_LDA_ABS_Y:
+            case IC_LDA_ABS: _CPU_SET_REG_A(state, state.data); break;
+            case IC_LDX_ABS: _CPU_SET_REG_X(state, state.data); break;
+            case IC_LDY_ABS: _CPU_SET_REG_Y(state, state.data); break;
+            case IC_IL_LAX_ABS: _CPU_LAX(state); break;
+            case IC_ADC_ABS: case IC_ADC_ZP_X: _CPU_ADC(state); break;
+            case IC_SBC_ABS: case IC_SBC_ZP_X: _CPU_SBC(state); break;
+            case IC_CMP_ABS: case IC_CMP_ZP_X: _CPU_CMP(state, state.A); break;
+            case IC_CPX_ABS: _CPU_CMP(state, state.X); break;
+            case IC_CPY_ABS: _CPU_CMP(state, state.Y); break;
+            case IC_AND_ABS: case IC_AND_ZP_X: _CPU_SET_REG_A(state, state.A & state.data); break;
+            case IC_ORA_ABS: case IC_ORA_ZP_X: _CPU_SET_REG_A(state, state.A | state.data); break;
+            case IC_EOR_ABS: case IC_EOR_ZP_X: _CPU_SET_REG_A(state, state.A ^ state.data); break;
+
+            case IC_LDA_ABS_X: case IC_LDA_ABS_Y:
                 _CPU_SET_REG_A(state, state.data);
+                _CPU_CHECK_PAGE_CROSS(state);
                 break;
 
-            case IC_LDX_ABS: case IC_LDX_ABS_Y:
+            case IC_LDX_ABS_Y:
                 _CPU_SET_REG_X(state, state.data);
+                _CPU_CHECK_PAGE_CROSS(state);
                 break;
 
-            case IC_LDY_ABS: case IC_LDY_ABS_X:
+            case IC_LDY_ABS_X:
                 _CPU_SET_REG_Y(state, state.data);
+                _CPU_CHECK_PAGE_CROSS(state);
                 break;
 
-            case IC_IL_LAX_ABS: case IC_IL_LAX_ABS_Y:
+            case IC_IL_LAX_ABS_Y:
                 _CPU_LAX(state);
+                _CPU_CHECK_PAGE_CROSS(state);
                 break;
 
-            case IC_ADC_ABS: case IC_ADC_ABS_X: case IC_ADC_ABS_Y: case IC_ADC_ZP_X: 
+            case IC_ADC_ABS_X: case IC_ADC_ABS_Y:
                 _CPU_ADC(state); 
+                _CPU_CHECK_PAGE_CROSS(state);
                 break;
 
-            case IC_SBC_ABS: case IC_SBC_ABS_X: case IC_SBC_ABS_Y: case IC_SBC_ZP_X: 
+            case IC_SBC_ABS_X: case IC_SBC_ABS_Y:
                 _CPU_SBC(state); 
+                _CPU_CHECK_PAGE_CROSS(state);
                 break;
 
-            case IC_CMP_ABS: case IC_CMP_ABS_X: case IC_CMP_ABS_Y: case IC_CMP_ZP_X:
+            case IC_CMP_ABS_X: case IC_CMP_ABS_Y:
                 _CPU_CMP(state, state.A);
+                _CPU_CHECK_PAGE_CROSS(state);
                 break;
 
-            case IC_CPX_ABS:
-                _CPU_CMP(state, state.X);
-                break;
-                
-            case IC_CPY_ABS:
-                _CPU_CMP(state, state.Y);
-                break;
-
-            case IC_AND_ABS: case IC_AND_ABS_X: case IC_AND_ABS_Y: case IC_AND_ZP_X: 
+            case IC_AND_ABS_X: case IC_AND_ABS_Y:
                 _CPU_SET_REG_A(state, state.A & state.data); 
+                _CPU_CHECK_PAGE_CROSS(state);
                 break;
 
-            case IC_ORA_ABS: case IC_ORA_ABS_X: case IC_ORA_ABS_Y: case IC_ORA_ZP_X: 
+            case IC_ORA_ABS_X: case IC_ORA_ABS_Y:
                 _CPU_SET_REG_A(state, state.A | state.data); 
+                _CPU_CHECK_PAGE_CROSS(state);
                 break;
 
-            case IC_EOR_ABS: case IC_EOR_ABS_X: case IC_EOR_ABS_Y: case IC_EOR_ZP_X: 
+            case IC_EOR_ABS_X: case IC_EOR_ABS_Y:
                 _CPU_SET_REG_A(state, state.A ^ state.data); 
+                _CPU_CHECK_PAGE_CROSS(state);
                 break;
 
             case IC_ROL_ABS: case IC_ROL_ABS_X: case IC_ROL_ZP: case IC_ROL_ZP_X:
@@ -793,6 +813,7 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_IL_ISB_IND_Y:
                 state.rw_mode = CPU_RW_MODE_READ;
                 state.address = ((state.data << 8) | state.temp) + state.Y;
+                state.temp = state.data;
                 return state;
             case IC_STA_IND_X:
                 state.rw_mode = CPU_RW_MODE_WRITE;
@@ -866,14 +887,14 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_EOR_IND_X: _CPU_SET_REG_A(state, state.A ^ state.data); return state;
             case IC_IL_LAX_IND_X: _CPU_LAX(state); return state;
 
-            case IC_LDA_IND_Y: _CPU_SET_REG_A(state, state.data); break;
-            case IC_ADC_IND_Y: _CPU_ADC(state); break;
-            case IC_SBC_IND_Y: _CPU_SBC(state); break;
-            case IC_CMP_IND_Y: _CPU_CMP(state, state.A); break;
-            case IC_AND_IND_Y: _CPU_SET_REG_A(state, state.A & state.data); break;
-            case IC_ORA_IND_Y: _CPU_SET_REG_A(state, state.A | state.data); break;
-            case IC_EOR_IND_Y: _CPU_SET_REG_A(state, state.A ^ state.data); break;
-            case IC_IL_LAX_IND_Y: _CPU_LAX(state); break;
+            case IC_LDA_IND_Y: _CPU_SET_REG_A(state, state.data);   _CPU_CHECK_PAGE_CROSS(state); break;
+            case IC_ADC_IND_Y: _CPU_ADC(state);             _CPU_CHECK_PAGE_CROSS(state); break;
+            case IC_SBC_IND_Y: _CPU_SBC(state);             _CPU_CHECK_PAGE_CROSS(state); break;
+            case IC_CMP_IND_Y: _CPU_CMP(state, state.A);    _CPU_CHECK_PAGE_CROSS(state); break;
+            case IC_AND_IND_Y: _CPU_SET_REG_A(state, state.A & state.data); _CPU_CHECK_PAGE_CROSS(state); break;
+            case IC_ORA_IND_Y: _CPU_SET_REG_A(state, state.A | state.data); _CPU_CHECK_PAGE_CROSS(state); break;
+            case IC_EOR_IND_Y: _CPU_SET_REG_A(state, state.A ^ state.data); _CPU_CHECK_PAGE_CROSS(state); break;
+            case IC_IL_LAX_IND_Y: _CPU_LAX(state); _CPU_CHECK_PAGE_CROSS(state); break;
 
             case IC_JMP_IND:
                 state.PC = (state.data << 8) | state.temp;
