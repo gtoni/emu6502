@@ -235,4 +235,13 @@
 #define IC_IL_ISB_IND_X      0xE3
 #define IC_IL_ISB_IND_Y      0xF3
 
+#define IC_IL_SLO_ABS        0x0F
+#define IC_IL_SLO_ABS_X      0x1F
+#define IC_IL_SLO_ABS_Y      0x1B
+#define IC_IL_SLO_ZP         0x07
+#define IC_IL_SLO_ZP_X       0x17
+#define IC_IL_SLO_IND_X      0x03
+#define IC_IL_SLO_IND_Y      0x13
+
+
 #endif
