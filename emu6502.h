@@ -68,7 +68,12 @@ enum cpu_status_flags
 }
 
 #define _CPU_CHECK_PAGE_CROSS(cpu) \
-    if (cpu.temp != (cpu.address>>8)) return cpu;
+    if (cpu.temp) {\
+        cpu.rw_mode = CPU_RW_MODE_READ;\
+        cpu.address += 0x0100;\
+        return cpu;\
+    }    
+
 
 #define _CPU_BIT(cpu)               _CPU_SET_REG_P(cpu, (cpu.P & 0x3D) | (cpu.data & 0xC0) | (((cpu.A & cpu.data) == 0)?2:0))
 
@@ -158,15 +163,10 @@ static cpu_state cpu_execute(cpu_state state)
     uint8_t cycle = state.cycle++;
     uint_fast32_t instruction = _CPU_GET_INSTRUCTION(state);
 
-    if (state.address == state.PC && state.rw_mode == CPU_RW_MODE_READ)
-    {
-        state.PC++;
-        state.rw_mode = CPU_RW_MODE_NONE;
-    }
-
     if (cycle == 0)
     {
         _CPU_SET_INSTRUCTION(state, state.data);
+        state.rw_mode = CPU_RW_MODE_NONE;
 
         switch (state.data)
         {
@@ -250,7 +250,7 @@ static cpu_state cpu_execute(cpu_state state)
 
                 /* fetch first operand */
                 state.rw_mode = CPU_RW_MODE_READ;
-                state.address = state.PC;
+                state.address = state.PC++;
                 return state;
 
             default: 
@@ -321,7 +321,7 @@ static cpu_state cpu_execute(cpu_state state)
 
                 /* fetch high byte of absolute address */
                 state.rw_mode = CPU_RW_MODE_READ;
-                state.address = state.PC;
+                state.address = state.PC++;
                 state.temp = state.data;
                 return state;
 
@@ -516,6 +516,7 @@ static cpu_state cpu_execute(cpu_state state)
                 return state;
             case IC_LDA_ABS_X:
             case IC_LDY_ABS_X:
+            case IC_STA_ABS_X:
             case IC_ROL_ABS_X:
             case IC_ROR_ABS_X:
             case IC_DEC_ABS_X:
@@ -533,11 +534,12 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_IL_ISB_ABS_X:
             case IC_IL_SLO_ABS_X:
                 state.rw_mode = CPU_RW_MODE_READ;
-                state.address = ((state.data << 8) | state.temp) + state.X;
-                state.temp = state.data;
+                state.address = (state.data << 8) | ((state.temp + state.X) & 0xFF);
+                state.temp = ((uint16_t)state.temp + (uint16_t)state.X) >> 8;
                 return state;
             case IC_LDA_ABS_Y:
             case IC_LDX_ABS_Y:
+            case IC_STA_ABS_Y:
             case IC_ADC_ABS_Y:
             case IC_SBC_ABS_Y:
             case IC_CMP_ABS_Y:
@@ -549,22 +551,12 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_IL_ISB_ABS_Y:
             case IC_IL_SLO_ABS_Y:
                 state.rw_mode = CPU_RW_MODE_READ;
-                state.address = ((state.data << 8) | state.temp) + state.Y;
-                state.temp = state.data;
+                state.address = (state.data << 8) | ((state.temp + state.Y) & 0xFF);
+                state.temp = ((uint16_t)state.temp + (uint16_t)state.Y) >> 8;
                 return state;
             case IC_STA_ABS:
                 state.rw_mode = CPU_RW_MODE_WRITE;
                 state.address = (state.data << 8) | state.temp;
-                state.data = state.A;
-                return state;
-            case IC_STA_ABS_X:
-                state.rw_mode = CPU_RW_MODE_WRITE;
-                state.address = ((state.data << 8) | state.temp) + state.X;
-                state.data = state.A;
-                return state;
-            case IC_STA_ABS_Y:
-                state.rw_mode = CPU_RW_MODE_WRITE;
-                state.address = ((state.data << 8) | state.temp) + state.Y;
                 state.data = state.A;
                 return state;
             case IC_STX_ABS:
@@ -613,8 +605,7 @@ static cpu_state cpu_execute(cpu_state state)
                 return state;
             case IC_JMP:
                 state.rw_mode = CPU_RW_MODE_NONE;
-                state.address = (state.data << 8) | state.temp;
-                state.PC = state.address;
+                state.PC = (state.data << 8) | state.temp;
                 break;
             case IC_JMP_IND:
                 state.rw_mode = CPU_RW_MODE_READ;
@@ -716,96 +707,121 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_EOR_ABS: case IC_EOR_ZP_X: _CPU_SET_REG_A(state, state.A ^ state.data); break;
 
             case IC_LDA_ABS_X: case IC_LDA_ABS_Y:
-                _CPU_SET_REG_A(state, state.data);
                 _CPU_CHECK_PAGE_CROSS(state);
+                _CPU_SET_REG_A(state, state.data);
                 break;
 
             case IC_LDX_ABS_Y:
-                _CPU_SET_REG_X(state, state.data);
                 _CPU_CHECK_PAGE_CROSS(state);
+                _CPU_SET_REG_X(state, state.data);
                 break;
 
             case IC_LDY_ABS_X:
-                _CPU_SET_REG_Y(state, state.data);
                 _CPU_CHECK_PAGE_CROSS(state);
+                _CPU_SET_REG_Y(state, state.data);
                 break;
 
             case IC_IL_LAX_ABS_Y:
-                _CPU_LAX(state);
                 _CPU_CHECK_PAGE_CROSS(state);
+                _CPU_LAX(state);
                 break;
 
             case IC_ADC_ABS_X: case IC_ADC_ABS_Y:
-                _CPU_ADC(state); 
                 _CPU_CHECK_PAGE_CROSS(state);
+                _CPU_ADC(state); 
                 break;
 
             case IC_SBC_ABS_X: case IC_SBC_ABS_Y:
-                _CPU_SBC(state); 
                 _CPU_CHECK_PAGE_CROSS(state);
+                _CPU_SBC(state); 
                 break;
 
             case IC_CMP_ABS_X: case IC_CMP_ABS_Y:
-                _CPU_CMP(state, state.A);
                 _CPU_CHECK_PAGE_CROSS(state);
+                _CPU_CMP(state, state.A);
                 break;
 
             case IC_AND_ABS_X: case IC_AND_ABS_Y:
-                _CPU_SET_REG_A(state, state.A & state.data); 
                 _CPU_CHECK_PAGE_CROSS(state);
+                _CPU_SET_REG_A(state, state.A & state.data); 
                 break;
 
             case IC_ORA_ABS_X: case IC_ORA_ABS_Y:
-                _CPU_SET_REG_A(state, state.A | state.data); 
                 _CPU_CHECK_PAGE_CROSS(state);
+                _CPU_SET_REG_A(state, state.A | state.data); 
                 break;
 
             case IC_EOR_ABS_X: case IC_EOR_ABS_Y:
-                _CPU_SET_REG_A(state, state.A ^ state.data); 
                 _CPU_CHECK_PAGE_CROSS(state);
+                _CPU_SET_REG_A(state, state.A ^ state.data); 
                 break;
 
-            case IC_ROL_ABS: case IC_ROL_ABS_X: case IC_ROL_ZP: case IC_ROL_ZP_X:
+            case IC_STA_ABS_X:
+                state.rw_mode = CPU_RW_MODE_WRITE;
+                state.address += state.temp * 0x0100;
+                state.data = state.A;
+                return state;
+
+            case IC_STA_ABS_Y:
+                state.rw_mode = CPU_RW_MODE_WRITE;
+                state.address += state.temp * 0x0100;
+                state.data = state.A;
+                return state;
+
+            case IC_ROL_ABS_X:
+            case IC_ROR_ABS_X:
+            case IC_DEC_ABS_X:
+            case IC_INC_ABS_X:
+            case IC_ASL_ABS_X:
+            case IC_LSR_ABS_X:
+            case IC_IL_DCP_ABS_X: case IC_IL_DCP_ABS_Y: 
+            case IC_IL_ISB_ABS_X: case IC_IL_ISB_ABS_Y: 
+            case IC_IL_SLO_ABS_X: case IC_IL_SLO_ABS_Y: 
+                state.rw_mode = CPU_RW_MODE_READ;
+                state.address += state.temp * 0x0100;
+                return state;
+
+            case IC_ROL_ABS: case IC_ROL_ZP: case IC_ROL_ZP_X:
                 state.rw_mode = CPU_RW_MODE_WRITE;
                 _CPU_ROL(state, state.data);
                 return state;
 
-            case IC_ROR_ABS: case IC_ROR_ABS_X: case IC_ROR_ZP: case IC_ROR_ZP_X:
+            case IC_ROR_ABS: case IC_ROR_ZP: case IC_ROR_ZP_X:
                 state.rw_mode = CPU_RW_MODE_WRITE;
                 _CPU_ROR(state, state.data);
                 return state;
 
-            case IC_DEC_ABS: case IC_DEC_ABS_X: case IC_DEC_ZP: case IC_DEC_ZP_X:
+            case IC_DEC_ABS: case IC_DEC_ZP: case IC_DEC_ZP_X:
                 state.rw_mode = CPU_RW_MODE_WRITE;
                 state.data -= 1;
                 _CPU_UPDATE_NZ(state, state.data);
                 return state;
 
-            case IC_INC_ABS: case IC_INC_ABS_X: case IC_INC_ZP: case IC_INC_ZP_X:
+            case IC_INC_ABS: case IC_INC_ZP: case IC_INC_ZP_X:
                 state.rw_mode = CPU_RW_MODE_WRITE;
                 state.data += 1;
                 _CPU_UPDATE_NZ(state, state.data);
                 return state;
 
-            case IC_ASL_ABS: case IC_ASL_ABS_X: case IC_ASL_ZP: case IC_ASL_ZP_X:
+            case IC_ASL_ABS: case IC_ASL_ZP: case IC_ASL_ZP_X:
                 state.rw_mode = CPU_RW_MODE_WRITE;
                 _CPU_ASL(state, state.data);
                 return state;
 
-            case IC_LSR_ABS: case IC_LSR_ABS_X: case IC_LSR_ZP: case IC_LSR_ZP_X:
+            case IC_LSR_ABS: case IC_LSR_ZP: case IC_LSR_ZP_X:
                 state.rw_mode = CPU_RW_MODE_WRITE;
                 _CPU_LSR(state, state.data);
                 return state;
 
-            case IC_IL_DCP_ABS: case IC_IL_DCP_ABS_X: case IC_IL_DCP_ABS_Y: case IC_IL_DCP_ZP: case IC_IL_DCP_ZP_X:
+            case IC_IL_DCP_ABS: case IC_IL_DCP_ZP: case IC_IL_DCP_ZP_X:
                 _CPU_DCP(state);
                 return state;
 
-            case IC_IL_ISB_ABS: case IC_IL_ISB_ABS_X: case IC_IL_ISB_ABS_Y: case IC_IL_ISB_ZP: case IC_IL_ISB_ZP_X:
+            case IC_IL_ISB_ABS: case IC_IL_ISB_ZP: case IC_IL_ISB_ZP_X:
                 _CPU_ISB(state);
                 return state;
 
-            case IC_IL_SLO_ABS: case IC_IL_SLO_ABS_X: case IC_IL_SLO_ABS_Y: case IC_IL_SLO_ZP: case IC_IL_SLO_ZP_X:
+            case IC_IL_SLO_ABS: case IC_IL_SLO_ZP: case IC_IL_SLO_ZP_X:
                 _CPU_SLO(state);
                 return state;
 
@@ -837,8 +853,8 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_IL_ISB_IND_Y:
             case IC_IL_SLO_IND_Y:
                 state.rw_mode = CPU_RW_MODE_READ;
-                state.address = ((state.data << 8) | state.temp) + state.Y;
-                state.temp = state.data;
+                state.address = (state.data << 8) | ((state.temp + state.Y) & 0xFF);
+                state.temp = ((uint16_t)state.temp + (uint16_t)state.Y) >> 8;
                 return state;
             case IC_STA_IND_X:
                 state.rw_mode = CPU_RW_MODE_WRITE;
@@ -846,9 +862,9 @@ static cpu_state cpu_execute(cpu_state state)
                 state.data = state.A;
                 return state;
             case IC_STA_IND_Y:
-                state.rw_mode = CPU_RW_MODE_WRITE;
-                state.address = ((state.data << 8) | state.temp) + state.Y;
-                state.data = state.A;
+                state.rw_mode = CPU_RW_MODE_READ;
+                state.address = (state.data << 8) | ((state.temp + state.Y) & 0xFF);
+                state.temp = ((uint16_t)state.temp + (uint16_t)state.Y) >> 8;
                 return state;
             case IC_IL_SAX_IND_X:
                 state.rw_mode = CPU_RW_MODE_WRITE;
@@ -872,11 +888,6 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_RTI:
                 state.rw_mode = CPU_RW_MODE_NONE;
                 state.PC = (state.data << 8) | state.temp;
-                return state;
-            case IC_STA_ABS_X:
-            case IC_STA_ABS_Y:
-                state.rw_mode = CPU_RW_MODE_NONE;
-                // empty cycles
                 return state;
            default: break;
         }
@@ -903,6 +914,91 @@ static cpu_state cpu_execute(cpu_state state)
                     state.address = 0xfffc;
                 }
                 return state;
+
+             case IC_LDA_ABS_X: case IC_LDA_ABS_Y:
+                _CPU_SET_REG_A(state, state.data);
+                break;
+
+            case IC_LDX_ABS_Y:
+                _CPU_SET_REG_X(state, state.data);
+                break;
+
+            case IC_LDY_ABS_X:
+                _CPU_SET_REG_Y(state, state.data);
+                break;
+
+            case IC_IL_LAX_ABS_Y:
+                _CPU_LAX(state);
+                break;
+
+            case IC_ADC_ABS_X: case IC_ADC_ABS_Y:
+                _CPU_ADC(state); 
+                break;
+
+            case IC_SBC_ABS_X: case IC_SBC_ABS_Y:
+                _CPU_SBC(state); 
+                break;
+
+            case IC_CMP_ABS_X: case IC_CMP_ABS_Y:
+                _CPU_CMP(state, state.A);
+                break;
+
+            case IC_AND_ABS_X: case IC_AND_ABS_Y:
+                _CPU_SET_REG_A(state, state.A & state.data); 
+                break;
+
+            case IC_ORA_ABS_X: case IC_ORA_ABS_Y:
+                _CPU_SET_REG_A(state, state.A | state.data); 
+                break;
+
+            case IC_EOR_ABS_X: case IC_EOR_ABS_Y:
+                _CPU_SET_REG_A(state, state.A ^ state.data); 
+                break;
+
+            case IC_ROL_ABS_X:
+                state.rw_mode = CPU_RW_MODE_WRITE;
+                _CPU_ROL(state, state.data);
+                return state;
+
+            case IC_ROR_ABS_X:
+                state.rw_mode = CPU_RW_MODE_WRITE;
+                _CPU_ROR(state, state.data);
+                return state;
+
+            case IC_DEC_ABS_X:
+                state.rw_mode = CPU_RW_MODE_WRITE;
+                state.data -= 1;
+                _CPU_UPDATE_NZ(state, state.data);
+                return state;
+
+            case IC_INC_ABS_X:
+                state.rw_mode = CPU_RW_MODE_WRITE;
+                state.data += 1;
+                _CPU_UPDATE_NZ(state, state.data);
+                return state;
+
+            case IC_ASL_ABS_X:
+                state.rw_mode = CPU_RW_MODE_WRITE;
+                _CPU_ASL(state, state.data);
+                return state;
+
+            case IC_LSR_ABS_X:
+                state.rw_mode = CPU_RW_MODE_WRITE;
+                _CPU_LSR(state, state.data);
+                return state;
+
+            case IC_IL_DCP_ABS_X: case IC_IL_DCP_ABS_Y:
+                _CPU_DCP(state);
+                return state;
+
+            case IC_IL_ISB_ABS_X: case IC_IL_ISB_ABS_Y:
+                _CPU_ISB(state);
+                return state;
+
+            case IC_IL_SLO_ABS_X: case IC_IL_SLO_ABS_Y:
+                _CPU_SLO(state);
+                return state;
+               
             case IC_LDA_IND_X: _CPU_SET_REG_A(state, state.data); return state;
             case IC_ADC_IND_X: _CPU_ADC(state); return state;
             case IC_SBC_IND_X: _CPU_SBC(state); return state;
@@ -912,14 +1008,20 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_EOR_IND_X: _CPU_SET_REG_A(state, state.A ^ state.data); return state;
             case IC_IL_LAX_IND_X: _CPU_LAX(state); return state;
 
-            case IC_LDA_IND_Y: _CPU_SET_REG_A(state, state.data);   _CPU_CHECK_PAGE_CROSS(state); break;
-            case IC_ADC_IND_Y: _CPU_ADC(state);             _CPU_CHECK_PAGE_CROSS(state); break;
-            case IC_SBC_IND_Y: _CPU_SBC(state);             _CPU_CHECK_PAGE_CROSS(state); break;
-            case IC_CMP_IND_Y: _CPU_CMP(state, state.A);    _CPU_CHECK_PAGE_CROSS(state); break;
-            case IC_AND_IND_Y: _CPU_SET_REG_A(state, state.A & state.data); _CPU_CHECK_PAGE_CROSS(state); break;
-            case IC_ORA_IND_Y: _CPU_SET_REG_A(state, state.A | state.data); _CPU_CHECK_PAGE_CROSS(state); break;
-            case IC_EOR_IND_Y: _CPU_SET_REG_A(state, state.A ^ state.data); _CPU_CHECK_PAGE_CROSS(state); break;
-            case IC_IL_LAX_IND_Y: _CPU_LAX(state); _CPU_CHECK_PAGE_CROSS(state); break;
+            case IC_LDA_IND_Y: _CPU_CHECK_PAGE_CROSS(state); _CPU_SET_REG_A(state, state.data); break;
+            case IC_ADC_IND_Y: _CPU_CHECK_PAGE_CROSS(state); _CPU_ADC(state); break;
+            case IC_SBC_IND_Y: _CPU_CHECK_PAGE_CROSS(state); _CPU_SBC(state); break;
+            case IC_CMP_IND_Y: _CPU_CHECK_PAGE_CROSS(state); _CPU_CMP(state, state.A); break;
+            case IC_AND_IND_Y: _CPU_CHECK_PAGE_CROSS(state); _CPU_SET_REG_A(state, state.A & state.data); break;
+            case IC_ORA_IND_Y: _CPU_CHECK_PAGE_CROSS(state); _CPU_SET_REG_A(state, state.A | state.data); break;
+            case IC_EOR_IND_Y: _CPU_CHECK_PAGE_CROSS(state); _CPU_SET_REG_A(state, state.A ^ state.data); break;
+            case IC_IL_LAX_IND_Y: _CPU_CHECK_PAGE_CROSS(state); _CPU_LAX(state); break;
+
+            case IC_STA_IND_Y:
+                state.rw_mode = CPU_RW_MODE_WRITE;
+                state.address += state.temp * 0x0100;
+                state.data = state.A;
+                return state;
 
             case IC_JMP_IND:
                 state.PC = (state.data << 8) | state.temp;
@@ -929,30 +1031,28 @@ static cpu_state cpu_execute(cpu_state state)
                 state.address = state.PC;
                 return state;
 
-            case IC_IL_DCP_IND_X: case IC_IL_DCP_IND_Y:
-                _CPU_DCP(state); 
+            case IC_IL_DCP_IND_X: _CPU_DCP(state); return state;
+            case IC_IL_ISB_IND_X: _CPU_ISB(state); return state;
+            case IC_IL_SLO_IND_X: _CPU_SLO(state); return state;
+
+            case IC_IL_DCP_IND_Y:
+            case IC_IL_ISB_IND_Y:
+            case IC_IL_SLO_IND_Y:
+                state.rw_mode = CPU_RW_MODE_READ;
+                state.address += state.temp * 0x0100;
                 return state;
 
-            case IC_IL_ISB_IND_X: case IC_IL_ISB_IND_Y:
-                _CPU_ISB(state);
-                return state;
-
-            case IC_IL_SLO_IND_X: case IC_IL_SLO_IND_Y:
-                _CPU_SLO(state);
-                return state;
-
-            case IC_ROL_ABS: case IC_ROL_ABS_X: case IC_ROL_ZP_X:
-            case IC_ROR_ABS: case IC_ROR_ABS_X: case IC_ROR_ZP_X:
-            case IC_DEC_ABS: case IC_DEC_ABS_X: case IC_DEC_ZP_X:
-            case IC_INC_ABS: case IC_INC_ABS_X: case IC_INC_ZP_X:
-            case IC_ASL_ABS: case IC_ASL_ABS_X: case IC_ASL_ZP_X:
-            case IC_LSR_ABS: case IC_LSR_ABS_X: case IC_LSR_ZP_X:
+            case IC_ROL_ABS: case IC_ROL_ZP_X:
+            case IC_ROR_ABS: case IC_ROR_ZP_X:
+            case IC_DEC_ABS: case IC_DEC_ZP_X:
+            case IC_INC_ABS: case IC_INC_ZP_X:
+            case IC_ASL_ABS: case IC_ASL_ZP_X:
+            case IC_LSR_ABS: case IC_LSR_ZP_X:
             case IC_STA_IND_X:
-            case IC_STA_IND_Y:
             case IC_IL_SAX_IND_X:
-            case IC_IL_DCP_ABS: case IC_IL_DCP_ABS_X: case IC_IL_DCP_ABS_Y: case IC_IL_DCP_ZP_X:
-            case IC_IL_ISB_ABS: case IC_IL_ISB_ABS_X: case IC_IL_ISB_ABS_Y: case IC_IL_ISB_ZP_X:
-            case IC_IL_SLO_ABS: case IC_IL_SLO_ABS_X: case IC_IL_SLO_ABS_Y: case IC_IL_SLO_ZP_X:
+            case IC_IL_DCP_ABS: case IC_IL_DCP_ZP_X:
+            case IC_IL_ISB_ABS: case IC_IL_ISB_ZP_X:
+            case IC_IL_SLO_ABS: case IC_IL_SLO_ZP_X:
             case IC_RTS:
             case IC_RTI:
                 state.rw_mode = CPU_RW_MODE_NONE;
@@ -974,18 +1074,33 @@ static cpu_state cpu_execute(cpu_state state)
             case IC_JSR:
                 state.PC = (state.data << 8) | state.temp;
                 break;
+
+            case IC_IL_DCP_IND_Y: _CPU_DCP(state); return state;
+            case IC_IL_ISB_IND_Y: _CPU_ISB(state); return state;
+            case IC_IL_SLO_IND_Y: _CPU_SLO(state); return state;
+
             case IC_ROL_ABS_X:
             case IC_ROR_ABS_X:
             case IC_DEC_ABS_X:
             case IC_INC_ABS_X:
             case IC_ASL_ABS_X:
             case IC_LSR_ABS_X:
-            case IC_IL_DCP_ABS_X: case IC_IL_DCP_ABS_Y: case IC_IL_DCP_IND_X: case IC_IL_DCP_IND_Y:
-            case IC_IL_ISB_ABS_X: case IC_IL_ISB_ABS_Y: case IC_IL_ISB_IND_X: case IC_IL_ISB_IND_Y:
-            case IC_IL_SLO_ABS_X: case IC_IL_SLO_ABS_Y: case IC_IL_SLO_IND_X: case IC_IL_SLO_IND_Y:
+            case IC_IL_DCP_ABS_X: case IC_IL_DCP_ABS_Y: case IC_IL_DCP_IND_X:
+            case IC_IL_ISB_ABS_X: case IC_IL_ISB_ABS_Y: case IC_IL_ISB_IND_X:
+            case IC_IL_SLO_ABS_X: case IC_IL_SLO_ABS_Y: case IC_IL_SLO_IND_X:
                 state.rw_mode = CPU_RW_MODE_NONE;
                 // empty cycle
                 return state;
+
+            /* Executed if page-cross */
+            case IC_LDA_IND_Y: _CPU_SET_REG_A(state, state.data); break;
+            case IC_ADC_IND_Y: _CPU_ADC(state); break;
+            case IC_SBC_IND_Y: _CPU_SBC(state); break;
+            case IC_CMP_IND_Y: _CPU_CMP(state, state.A); break;
+            case IC_AND_IND_Y: _CPU_SET_REG_A(state, state.A & state.data); break;
+            case IC_ORA_IND_Y: _CPU_SET_REG_A(state, state.A | state.data); break;
+            case IC_EOR_IND_Y: _CPU_SET_REG_A(state, state.A ^ state.data); break;
+            case IC_IL_LAX_IND_Y: _CPU_LAX(state); break;
         }
     }
     else if (cycle == 6)
@@ -1011,7 +1126,7 @@ static cpu_state cpu_execute(cpu_state state)
 
     state.cycle = 0;
     state.rw_mode = CPU_RW_MODE_READ;
-    state.address = state.PC;
+    state.address = state.PC++;
     return state;
 }
 

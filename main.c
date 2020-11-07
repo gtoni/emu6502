@@ -7,7 +7,7 @@
 #include <time.h>
 #include "emu6502.h"
 
-// Before: about 37 Mhz
+// Best: 40 Mhz
 //
 
 #define BENCHMARK 0
@@ -160,8 +160,10 @@ void run_nestest()
     FILE* log = fopen("test/nestest.log", "r");
     if (log)
     {
+        int cpu_init = 0;
         cpu_state cpu = cpu_reset();
-        cpu.address = cpu.PC = 0xC000;
+        cpu.PC = 0xC000;
+        cpu.address = cpu.PC++;
         cpu.rw_mode = CPU_RW_MODE_READ;
         cpu.S = 0xFD;
         cpu.P = 0x24;
@@ -216,10 +218,10 @@ void run_nestest()
 
             sscanf(rest, " A:%02X X:%02X Y:%02X P:%02X SP:%02X", &A, &X, &Y, &P, &SP);
 
-            printf("PC: %04X \tLOG: %04X %s\nmA: %02X mX: %02X mY: %02X mP: %02X mSP: %02X -- ", cpu.PC, addr, asembly, cpu.A, cpu.X, cpu.Y, cpu.P, cpu.S);
+            printf("PC: %04X \tLOG: %04X %s\nmA: %02X mX: %02X mY: %02X mP: %02X mSP: %02X -- ", (cpu.PC - 1), addr, asembly, cpu.A, cpu.X, cpu.Y, cpu.P, cpu.S);
             printf("A:%02X X:%02X Y:%02X P:%02X S:%02X\n\n", A, X, Y, P, SP);
 
-            if (cpu.PC != addr || cpu.A != A || cpu.X != X || cpu.Y != Y || cpu.P != P || cpu.S != SP || (memory[2] || memory[3]))
+            if ((cpu.PC - 1) != addr || cpu.A != A || cpu.X != X || cpu.Y != Y || cpu.P != P || cpu.S != SP || (memory[2] || memory[3]))
             {
                 puts("Error");
                 break;
