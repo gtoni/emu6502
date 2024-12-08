@@ -205,6 +205,7 @@
 #define IC_IL_NOP_IMP3       0xC2
 #define IC_IL_NOP_IMP4       0xE2
 
+#define IC_IL_LAX_IMM        0xAB
 #define IC_IL_LAX_ABS        0xAF
 #define IC_IL_LAX_ABS_Y      0xBF
 #define IC_IL_LAX_ZP         0xA7
@@ -243,5 +244,37 @@
 #define IC_IL_SLO_IND_X      0x03
 #define IC_IL_SLO_IND_Y      0x13
 
+#define IC_IL_RLA_ABS        0x2F
+#define IC_IL_RLA_ABS_X      0x3F
+#define IC_IL_RLA_ABS_Y      0x3B
+#define IC_IL_RLA_ZP         0x27
+#define IC_IL_RLA_ZP_X       0x37
+#define IC_IL_RLA_IND_X      0x23
+#define IC_IL_RLA_IND_Y      0x33
+
+#define IC_IL_SRE_ABS        0x4F
+#define IC_IL_SRE_ABS_X      0x5F
+#define IC_IL_SRE_ABS_Y      0x5B
+#define IC_IL_SRE_ZP         0x47
+#define IC_IL_SRE_ZP_X       0x57
+#define IC_IL_SRE_IND_X      0x43
+#define IC_IL_SRE_IND_Y      0x53
+
+#define IC_IL_RRA_ABS        0x6F
+#define IC_IL_RRA_ABS_X      0x7F
+#define IC_IL_RRA_ABS_Y      0x7B
+#define IC_IL_RRA_ZP         0x67
+#define IC_IL_RRA_ZP_X       0x77
+#define IC_IL_RRA_IND_X      0x63
+#define IC_IL_RRA_IND_Y      0x73
+
+#define IC_IL_ANC_IMM        0x0B
+#define IC_IL_AAC_IMM        0x2B
+#define IC_IL_ALR_IMM        0x4B
+#define IC_IL_ARR_IMM        0x6B
+#define IC_IL_AXS_IMM        0xCB
+
+#define IC_IL_SHY_ABS_X      0x9C
+#define IC_IL_SHX_ABS_Y      0x9E
 
 #endif

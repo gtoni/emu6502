@@ -203,6 +203,7 @@ void run_nestest()
             }
         }
         fseek(log, 0, SEEK_SET);
+        int error = 0;
         while (!feof(log))
         {
             uint32_t addr;
@@ -212,7 +213,10 @@ void run_nestest()
             char asembly[32];
             char rest[255];
             int i;
-            fscanf(log, "%4X  %8c  %32c", &addr, opcodes, asembly); 
+
+            if (fscanf(log, "%4X  %8c  %32c", &addr, opcodes, asembly) == EOF)
+                break;
+
             asembly[31] = 0;
             fgets(rest, 255, log);
 
@@ -223,7 +227,7 @@ void run_nestest()
 
             if ((cpu.PC - 1) != addr || cpu.A != A || cpu.X != X || cpu.Y != Y || cpu.P != P || cpu.S != SP || (memory[2] || memory[3]))
             {
-                puts("Error");
+                error = 1;
                 break;
             }
 
@@ -241,6 +245,8 @@ void run_nestest()
             while ((cpu.cycle & 0xFF) != 0);
         }
         fclose(log);
+
+        puts(error?"Error":"Success");
     }
     
     free(memory);
